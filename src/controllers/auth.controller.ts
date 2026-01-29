@@ -41,30 +41,47 @@ const setTokenCookies = (res: Response, user: any) => {
 };
 
 /* =====================================
-   LOGIN
+    LOGIN (Refactored without next())
 ===================================== */
-export const login = async (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) => {
+/* =====================================
+    LOGIN
+===================================== */
+export const login = async (req: Request, res: Response) => {
+  console.log("--- Login Attempt Start ---");
+  console.log("PJ Number received:", req.body.pjNumber);
+
   try {
     const { pjNumber, password } = req.body;
-    if (!pjNumber || !password)
-      return next(new AppError("PJ Number and password are required", 400));
 
-    const user = await User.findOne({ pjNumber }).select("+password");
-    if (!user || !(await user.comparePassword(password))) {
-      return next(new AppError("Invalid credentials", 401));
+    if (!pjNumber || !password) {
+      return res.status(400).json({
+        status: "fail",
+        message: "PJ Number and password are required",
+      });
     }
 
-    if (!user.isActive)
-      return next(new AppError("Account is deactivated", 403));
+    const user = await User.findOne({ pjNumber }).select("+password");
+    
+    // Check Existence and Password
+    if (!user || !(await user.comparePassword(password))) {
+      console.warn(`Auth Failed for PJ: ${pjNumber} - Reason: User not found or password mismatch`);
+      return res.status(401).json({
+        status: "fail",
+        message: "Invalid credentials", // THIS IS WHAT THE FRONTEND NEEDS
+      });
+    }
 
-    // Set Cookies
+    if (!user.isActive) {
+      return res.status(403).json({
+        status: "fail",
+        message: "Account is deactivated",
+      });
+    }
+
     setTokenCookies(res, user);
 
-    res.status(200).json({
+    console.log(`Auth Success: ${user.firstName} logged in`);
+    return res.status(200).json({
       status: "success",
       message: "Login successful",
       data: {
@@ -76,10 +93,17 @@ export const login = async (
         },
       },
     });
-  } catch (error) {
-    next(error);
+    
+  } catch (error: any) {
+    console.error("Critical Login Error:", error);
+    return res.status(500).json({
+      status: "error",
+      message: "An internal server error occurred",
+    });
   }
 };
+
+
 
 /* =====================================
    REFRESH TOKEN

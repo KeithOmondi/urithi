@@ -32,21 +32,19 @@ export interface IRecord extends Document {
 }
 
 export const calculateLeadTime = (
-  start?: Date | string | null,
-  end?: Date | string | null,
+  dateA?: Date | string | null,
+  dateB?: Date | string | null,
 ): number | null => {
-  if (!start || !end) return null;
+  if (!dateA || !dateB) return null;
 
-  const startDate = new Date(start);
-  const endDate = new Date(end);
+  const a = new Date(dateA);
+  const b = new Date(dateB);
 
-  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) return null;
+  if (isNaN(a.getTime()) || isNaN(b.getTime())) return null;
 
-  const diffMs = endDate.getTime() - startDate.getTime();
-  const diffDays = diffMs / (1000 * 60 * 60 * 24);
+  const diffMs = Math.abs(b.getTime() - a.getTime());
 
-  // Use Math.round to handle leap seconds/DST and Math.abs to kill the negative sign
-  return Math.abs(Math.round(diffDays));
+  return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 };
 
 const recordSchema = new Schema<IRecord>(
@@ -101,24 +99,23 @@ recordSchema.pre("save", function () {
 
 recordSchema.pre("findOneAndUpdate", async function () {
   const update = this.getUpdate() as any;
-  const $set = update.$set || update;
+  const $set = (update.$set ??= {});
 
-  // We need current values from the DB to handle partial updates
   const current = await this.model.findOne(this.getQuery()).lean();
   if (!current) return;
 
-  // Receiving Lead Time Calculation
-  const startRec = $set.dateOfReceipt || current.dateOfReceipt;
-  const endRec = $set.dateReceived || current.dateReceived;
-  if (startRec && endRec) {
-    $set.receivingLeadTime = calculateLeadTime(startRec, endRec);
+  const recStart = $set.dateOfReceipt ?? current.dateOfReceipt;
+  const recEnd = $set.dateReceived ?? current.dateReceived;
+
+  if (recStart && recEnd) {
+    $set.receivingLeadTime = calculateLeadTime(recStart, recEnd);
   }
 
-  // Forwarding Lead Time Calculation
-  const startFwd = $set.dateReceived || current.dateReceived;
-  const endFwd = $set.dateForwardedToGP || current.dateForwardedToGP;
-  if (startFwd && endFwd) {
-    $set.forwardingLeadTime = calculateLeadTime(startFwd, endFwd);
+  const fwdStart = $set.dateReceived ?? current.dateReceived;
+  const fwdEnd = $set.dateForwardedToGP ?? current.dateForwardedToGP;
+
+  if (fwdStart && fwdEnd) {
+    $set.forwardingLeadTime = calculateLeadTime(fwdStart, fwdEnd);
   }
 });
 
