@@ -49,7 +49,7 @@ export const env = {
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN as JwtDuration,
   JWT_REFRESH_EXPIRES_IN: process.env.JWT_REFRESH_EXPIRES_IN as JwtDuration,
 
-  NODE_ENV: process.env.NODE_ENV || "development",
+  NODE_ENV: process.env.NODE_ENV || "production",
   APP_VERSION: process.env.APP_VERSION || "unknown",
   COMMIT_HASH: process.env.COMMIT_HASH || "unknown",
 

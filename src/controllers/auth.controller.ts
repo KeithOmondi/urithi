@@ -18,13 +18,12 @@ const setTokenCookies = (res: Response, user: any) => {
   const refreshToken = signRefreshToken(payload);
 
   const cookieOptions = {
-    httpOnly: true,
-    // If you are testing on HTTP (not HTTPS) localhost, 
-    // ensure secure is FALSE or it won't store the cookie.
-    secure: process.env.NODE_ENV === "production", 
-    sameSite: "lax" as const,
-    path: "/", // CRITICAL: Makes cookies accessible for all routes
-  };
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production", // must be true in prod
+  sameSite: process.env.NODE_ENV === "production" ? "none" as const : "lax" as const,
+  path: "/", // cookie available to all routes
+};
+
 
   // Set Access Token (short lived)
   res.cookie("accessToken", accessToken, {

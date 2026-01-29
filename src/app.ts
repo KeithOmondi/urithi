@@ -21,9 +21,11 @@ const app = express();
 
 app.use(
   cors({
-    origin: env.FRONTEND_URL,
-    credentials: true,
-  }),
+    origin: env.FRONTEND_URL,  // frontend domain
+    credentials: true,         // allow cookies / credentials
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], // allowed HTTP methods
+    allowedHeaders: ["Content-Type", "Authorization"], // headers your frontend sends
+  })
 );
 
 app.use(cookieParser());
