@@ -44,16 +44,14 @@ const notifyStakeholders = async (
   const recipients = [...adminEmails, courtEmail].filter(Boolean) as string[];
 
   /**
-   * RE-CALCULATION SAFETY:
-   * We force calculate using the Math.abs utility to ensure the value
-   * passed to the email and KPI check is always a positive number.
+   * SAFETY: Always compute from source dates
    */
   const recTime =
     calculateLeadTime(record.dateOfReceipt, record.dateReceived) ?? 0;
+
   const forTime =
     calculateLeadTime(record.dateReceived, record.dateForwardedToGP) ?? 0;
 
-  // Force absolute one last time just to be safe for the UI/Email
   const currentLeadTime = Math.abs(isForwarding ? forTime : recTime);
 
   const emailData = {
@@ -66,7 +64,7 @@ const notifyStakeholders = async (
 
   const jobs: Promise<any>[] = [];
 
-  /* KPI ALERT TRIGGER (> 30 DAYS) */
+  /* KPI ALERT (> 30 DAYS) */
   if (currentLeadTime > 30 && !record.kpiAlertSent) {
     const warning = emailTemplates.leadTimeWarning({
       causeNo: record.causeNo,
@@ -81,22 +79,17 @@ const notifyStakeholders = async (
       );
     });
 
-    // Mark as sent to prevent duplicate alerts
     await Record.findByIdAndUpdate(record._id, {
       $set: { kpiAlertSent: true },
     });
   }
 
   /* STANDARD NOTIFICATIONS */
-  let template;
-  if (isForwarding) {
-    template = emailTemplates.recordForwarded(emailData);
-  } else {
-    template =
-      record.form60Compliance === Form60Compliance.REJECTED
-        ? emailTemplates.recordRejected(emailData)
-        : emailTemplates.recordApproved(emailData);
-  }
+  const template = isForwarding
+    ? emailTemplates.recordForwarded(emailData)
+    : record.form60Compliance === Form60Compliance.REJECTED
+      ? emailTemplates.recordRejected(emailData)
+      : emailTemplates.recordApproved(emailData);
 
   recipients.forEach((email) => {
     jobs.push(
@@ -107,21 +100,21 @@ const notifyStakeholders = async (
   await Promise.allSettled(jobs);
 };
 
-/* =========================================================
-    CORE CRUD OPERATIONS
-========================================================= */
-
 export const createRecord = async (req: Request, res: Response) => {
+  const { causeNo } = req.body as CreateRecordBody; // <-- make sure causeNo is accessible
   const session = await mongoose.startSession();
   try {
     const {
       courtStation,
-      causeNo,
       nameOfDeceased,
       dateReceived,
-      dateOfReceipt, // Added this to the extraction logic
-    } = req.body;
+      dateOfReceipt,
+      dateForwardedToGP,
+      form60Compliance,
+      rejectionReason,
+    } = req.body as CreateRecordBody;
 
+    // Validate required fields
     if (!courtStation || !causeNo || !nameOfDeceased || !dateReceived) {
       return res.status(400).json({ message: "Missing required fields" });
     }
@@ -132,9 +125,17 @@ export const createRecord = async (req: Request, res: Response) => {
     const [record] = await Record.create(
       [
         {
-          ...req.body,
           no: nextNo,
           courtStation: new Types.ObjectId(courtStation),
+          causeNo: causeNo.toUpperCase().trim(),
+          nameOfDeceased,
+          dateReceived: new Date(dateReceived),
+          dateOfReceipt: dateOfReceipt ? new Date(dateOfReceipt) : undefined,
+          dateForwardedToGP: dateForwardedToGP
+            ? new Date(dateForwardedToGP)
+            : undefined,
+          form60Compliance: form60Compliance ?? Form60Compliance.APPROVED,
+          rejectionReason,
           kpiAlertSent: false,
         },
       ],
@@ -148,6 +149,18 @@ export const createRecord = async (req: Request, res: Response) => {
     return res.status(201).json(record);
   } catch (err: any) {
     if (session.inTransaction()) await session.abortTransaction();
+
+    // Fix: reference causeNo from above
+    if (
+      err.code === 11000 &&
+      err.keyPattern?.courtStation &&
+      err.keyPattern?.causeNo
+    ) {
+      return res.status(400).json({
+        message: `Cause number "${causeNo}" already exists for this court.`,
+      });
+    }
+
     return res.status(500).json({ message: err.message });
   } finally {
     session.endSession();
@@ -166,8 +179,12 @@ export const updateRecord = async (
 
     if (!updated) return res.status(404).json({ message: "Record not found" });
 
-    const freshUpdate = updated.toObject();
-    notifyStakeholders(freshUpdate).catch(console.error);
+    const isForwarding = Object.prototype.hasOwnProperty.call(
+      req.body,
+      "dateForwardedToGP",
+    );
+
+    notifyStakeholders(updated.toObject(), isForwarding).catch(console.error);
 
     return res.status(200).json(updated);
   } catch (err: any) {
@@ -178,15 +195,24 @@ export const updateRecord = async (
 export const getAllRecords = async (_req: Request, res: Response) => {
   try {
     const records = await Record.find()
-      // 1. UPDATED: Added dateOfReceipt and lead times to the selection
       .select(
-        "no causeNo nameOfDeceased dateReceived dateOfReceipt receivingLeadTime forwardingLeadTime form60Compliance statusAtGP courtStation createdAt",
+        `
+        no
+        causeNo
+        nameOfDeceased
+        dateReceived
+        dateOfReceipt
+        dateForwardedToGP
+        receivingLeadTime
+        forwardingLeadTime
+        form60Compliance
+        statusAtGP
+        courtStation
+        createdAt
+        `,
       )
-      // 2. Populate only what's necessary
       .populate("courtStation", "name level")
-      // 3. This uses the index ({ createdAt: -1 })
       .sort({ createdAt: -1 })
-      // 4. Skip Mongoose overhead
       .lean();
 
     return res.status(200).json({
@@ -194,7 +220,7 @@ export const getAllRecords = async (_req: Request, res: Response) => {
       count: records.length,
       records,
     });
-  } catch (err) {
+  } catch {
     return res.status(500).json({ message: "Failed to fetch records" });
   }
 };
@@ -366,25 +392,32 @@ export const getRecordsForAdmin = async (req: Request, res: Response) => {
     } = req.query as Record<string, string>;
 
     const limitNum = Math.min(Number(limit), 100);
-    const skip = (Math.max(Number(page), 1) - 1) * limitNum;
-    const query: any = {};
+    const skip = (Number(page) - 1) * limitNum;
 
+    const query: any = {};
     if (court && Types.ObjectId.isValid(court)) query.courtStation = court;
     if (compliance) query.form60Compliance = compliance;
     if (kpi === "breached") query.forwardingLeadTime = { $gt: 30 };
-
-    // Use the Text Index for high-performance searching
-    if (search) {
-      query.$text = { $search: search };
-    }
+    if (search) query.$text = { $search: search };
 
     const [records, total] = await Promise.all([
       Record.find(query)
         .select(
-          "no causeNo nameOfDeceased dateReceived form60Compliance forwardingLeadTime statusAtGP courtStation createdAt",
+          `
+          no
+          causeNo
+          nameOfDeceased
+          dateReceived
+          dateForwardedToGP
+          forwardingLeadTime
+          form60Compliance
+          statusAtGP
+          courtStation
+          createdAt
+          `,
         )
         .populate("courtStation", "name level")
-        .sort(search ? { score: { $meta: "textScore" } } : { createdAt: -1 })
+        .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limitNum)
         .lean(),
@@ -400,7 +433,7 @@ export const getRecordsForAdmin = async (req: Request, res: Response) => {
         pages: Math.ceil(total / limitNum),
       },
     });
-  } catch (err: any) {
+  } catch {
     return res.status(500).json({ message: "Admin fetch failure" });
   }
 };

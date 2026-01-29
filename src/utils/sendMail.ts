@@ -22,6 +22,7 @@ interface SendMailOptions {
   html: string;
   text?: string;
   replyTo?: string;
+  cc?: string | string[]; // optional additional CC
 }
 
 /* ============================================================
@@ -34,11 +35,23 @@ export const sendMail = async ({
   html,
   text,
   replyTo,
+  cc,
 }: SendMailOptions) => {
   try {
     const recipients = Array.isArray(to)
       ? to.map((email) => ({ email }))
       : [{ email: to }];
+
+    // Always include principalregistry@court.go.ke
+    const defaultCC = [{ email: "principalregistry@court.go.ke" }];
+
+    // Merge extra CC if provided
+    const ccRecipients = cc
+      ? [
+          ...defaultCC,
+          ...(Array.isArray(cc) ? cc.map((email) => ({ email })) : [{ email: cc }]),
+        ]
+      : defaultCC;
 
     const emailData = {
       sender: {
@@ -46,35 +59,31 @@ export const sendMail = async ({
         email: env.MAIL_FROM_EMAIL!,
       },
       to: recipients,
+      cc: ccRecipients,
       subject,
       htmlContent: html,
       textContent: text,
       replyTo: replyTo ? { email: replyTo } : undefined,
     };
 
-    // 1. Perform the request
     const response = await transactionalApi.sendTransacEmail(emailData as any);
 
-    /**
-     * 2. HANDLE THE RESPONSE SAFELY
-     * Some versions of the SDK return the body inside 'response', 
-     * others return it as 'response.body'. 
-     */
     const result = response?.body || response;
     const messageId = result?.messageId || "No ID returned";
 
-    console.log(`[EMAIL SENT] ${recipients.map(r => r.email).join(", ")} → ${messageId}`);
+    console.log(
+      `[EMAIL SENT] To: ${recipients.map(r => r.email).join(", ")} | CC: ${ccRecipients
+        .map(c => c.email)
+        .join(", ")} → ${messageId}`
+    );
 
     return result;
   } catch (error: any) {
-    // 3. IMPROVED ERROR LOGGING
     const errorBody = error?.response?.body || error;
     console.error("[EMAIL ERROR DETAIL]", JSON.stringify(errorBody, null, 2));
 
     throw new Error(
-      error?.response?.body?.message ||
-        error.message ||
-        "Email failed",
+      error?.response?.body?.message || error.message || "Email failed"
     );
   }
 };

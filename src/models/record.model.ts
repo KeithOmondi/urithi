@@ -31,27 +31,23 @@ export interface IRecord extends Document {
   updatedAt: Date;
 }
 
+// Lead time calculator
 export const calculateLeadTime = (
-  dateA?: Date | string | null,
-  dateB?: Date | string | null,
+  start?: Date | string | null,
+  end?: Date | string | null,
 ): number | null => {
-  if (!dateA || !dateB) return null;
-
-  const a = new Date(dateA);
-  const b = new Date(dateB);
-
+  if (!start || !end) return null;
+  const a = new Date(start);
+  const b = new Date(end);
   if (isNaN(a.getTime()) || isNaN(b.getTime())) return null;
-
-  const diffMs = Math.abs(b.getTime() - a.getTime());
-
-  return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  return Math.ceil(Math.abs(b.getTime() - a.getTime()) / 86400000);
 };
 
 const recordSchema = new Schema<IRecord>(
   {
     no: { type: Number, required: true, unique: true },
     courtStation: { type: Schema.Types.ObjectId, ref: "Court", required: true },
-    causeNo: { type: String, required: true, trim: true },
+    causeNo: { type: String, required: true, trim: true, uppercase: true },
     nameOfDeceased: { type: String, required: true, trim: true },
     dateReceived: { type: Date, required: true },
     dateOfReceipt: Date,
@@ -63,29 +59,26 @@ const recordSchema = new Schema<IRecord>(
       enum: Object.values(Form60Compliance),
       default: Form60Compliance.APPROVED,
     },
-    rejectionReason: { type: String, trim: true },
+    rejectionReason: String,
     statusAtGP: {
       type: String,
       enum: Object.values(StatusAtGP),
       default: StatusAtGP.PENDING,
     },
-    volumeNo: { type: String, trim: true },
+    volumeNo: String,
     datePublished: { type: Date, default: null },
     kpiAlertSent: { type: Boolean, default: false },
   },
   { timestamps: true },
 );
 
-// Indexes
-recordSchema.index({ createdAt: -1 });
+/* =========================
+   COMPOUND UNIQUE INDEX
+   - Prevent same causeNo in the same court
+========================= */
 recordSchema.index({ courtStation: 1, causeNo: 1 }, { unique: true });
-recordSchema.index({ forwardingLeadTime: 1 });
-recordSchema.index({ causeNo: "text", nameOfDeceased: "text" });
 
-/* =====================================
-    HOOKS (No next() used)
-===================================== */
-
+/* HOOKS */
 recordSchema.pre("save", function () {
   this.receivingLeadTime = calculateLeadTime(
     this.dateOfReceipt,
@@ -98,28 +91,23 @@ recordSchema.pre("save", function () {
 });
 
 recordSchema.pre("findOneAndUpdate", async function () {
-  const update = this.getUpdate() as any;
+  const update: any = this.getUpdate();
   const $set = (update.$set ??= {});
-
   const current = await this.model.findOne(this.getQuery()).lean();
   if (!current) return;
 
   const recStart = $set.dateOfReceipt ?? current.dateOfReceipt;
   const recEnd = $set.dateReceived ?? current.dateReceived;
-
   if (recStart && recEnd) {
     $set.receivingLeadTime = calculateLeadTime(recStart, recEnd);
   }
 
-  const fwdStart = $set.dateReceived ?? current.dateReceived;
   const fwdEnd = $set.dateForwardedToGP ?? current.dateForwardedToGP;
-
+  const fwdStart = $set.dateReceived ?? current.dateReceived;
   if (fwdStart && fwdEnd) {
     $set.forwardingLeadTime = calculateLeadTime(fwdStart, fwdEnd);
   }
 });
 
-export const Record: Model<IRecord> =
-  mongoose.models.Record || mongoose.model<IRecord>("Record", recordSchema);
-
-export default Record;
+export default mongoose.models.Record ||
+  mongoose.model<IRecord>("Record", recordSchema);
