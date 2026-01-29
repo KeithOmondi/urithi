@@ -1,9 +1,6 @@
-import mongoose, { Schema, Document, Model } from "mongoose";
+import mongoose, { Schema, Document, Model, Types } from "mongoose";
 import { ICourt } from "./court.model";
 
-/* =====================================
-    ENUMS & INTERFACE
-===================================== */
 export enum Form60Compliance {
   APPROVED = "Approved",
   REJECTED = "Rejected",
@@ -34,13 +31,6 @@ export interface IRecord extends Document {
   updatedAt: Date;
 }
 
-/* =====================================
-    LEAD TIME CALCULATOR
-===================================== */
-/**
- * Calculates days between two dates.
- * Always returns a positive number using Math.abs.
- */
 export const calculateLeadTime = (
   start?: Date | string | null,
   end?: Date | string | null,
@@ -52,13 +42,13 @@ export const calculateLeadTime = (
 
   if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) return null;
 
-  const diffMs = Math.abs(endDate.getTime() - startDate.getTime());
-  return Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const diffMs = endDate.getTime() - startDate.getTime();
+  const diffDays = diffMs / (1000 * 60 * 60 * 24);
+
+  // Use Math.round to handle leap seconds/DST and Math.abs to kill the negative sign
+  return Math.abs(Math.round(diffDays));
 };
 
-/* =====================================
-    SCHEMA DEFINITION
-===================================== */
 const recordSchema = new Schema<IRecord>(
   {
     no: { type: Number, required: true, unique: true },
@@ -88,71 +78,50 @@ const recordSchema = new Schema<IRecord>(
   { timestamps: true },
 );
 
-/* =====================================
-    PERFORMANCE INDEXES
-===================================== */
-
-// Index for Pagination & Default Sorting (Fastest fetching for Admin Dashboard)
+// Indexes
 recordSchema.index({ createdAt: -1 });
-
-// Compound Index for Station-specific views + Duplicate Prevention
 recordSchema.index({ courtStation: 1, causeNo: 1 }, { unique: true });
-
-// Performance index for lead time filtering (KPI Dashboard)
 recordSchema.index({ forwardingLeadTime: 1 });
-
-// Text Index for Search optimization (Cause No & Deceased Name)
 recordSchema.index({ causeNo: "text", nameOfDeceased: "text" });
 
 /* =====================================
-    HOOKS (Synchronous / No next())
+    HOOKS (No next() used)
 ===================================== */
 
-/**
- * PRE-SAVE HOOK
- * Automatically triggers on .save() or .create()
- */
 recordSchema.pre("save", function () {
   this.receivingLeadTime = calculateLeadTime(
     this.dateOfReceipt,
     this.dateReceived,
   );
-
   this.forwardingLeadTime = calculateLeadTime(
     this.dateReceived,
     this.dateForwardedToGP,
   );
 });
 
-/**
- * PRE-UPDATE HOOK
- * Triggers on findOneAndUpdate and findByIdAndUpdate
- */
-recordSchema.pre("findOneAndUpdate", function () {
+recordSchema.pre("findOneAndUpdate", async function () {
   const update = this.getUpdate() as any;
   const $set = update.$set || update;
 
-  // Recalculate if dates are provided in the update payload
-  if ($set.dateReceived || $set.dateOfReceipt) {
-    const start = $set.dateOfReceipt || update.dateOfReceipt;
-    const end = $set.dateReceived || update.dateReceived;
-    if (start && end) {
-      $set.receivingLeadTime = calculateLeadTime(start, end);
-    }
+  // We need current values from the DB to handle partial updates
+  const current = await this.model.findOne(this.getQuery()).lean();
+  if (!current) return;
+
+  // Receiving Lead Time Calculation
+  const startRec = $set.dateOfReceipt || current.dateOfReceipt;
+  const endRec = $set.dateReceived || current.dateReceived;
+  if (startRec && endRec) {
+    $set.receivingLeadTime = calculateLeadTime(startRec, endRec);
   }
 
-  if ($set.dateReceived || $set.dateForwardedToGP) {
-    const start = $set.dateReceived || update.dateReceived;
-    const end = $set.dateForwardedToGP || update.dateForwardedToGP;
-    if (start && end) {
-      $set.forwardingLeadTime = calculateLeadTime(start, end);
-    }
+  // Forwarding Lead Time Calculation
+  const startFwd = $set.dateReceived || current.dateReceived;
+  const endFwd = $set.dateForwardedToGP || current.dateForwardedToGP;
+  if (startFwd && endFwd) {
+    $set.forwardingLeadTime = calculateLeadTime(startFwd, endFwd);
   }
 });
 
-/* =====================================
-    EXPORT MODEL
-===================================== */
 export const Record: Model<IRecord> =
   mongoose.models.Record || mongoose.model<IRecord>("Record", recordSchema);
 

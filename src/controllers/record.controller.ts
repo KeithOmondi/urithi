@@ -53,7 +53,8 @@ const notifyStakeholders = async (
   const forTime =
     calculateLeadTime(record.dateReceived, record.dateForwardedToGP) ?? 0;
 
-  const currentLeadTime = isForwarding ? forTime : recTime;
+  // Force absolute one last time just to be safe for the UI/Email
+  const currentLeadTime = Math.abs(isForwarding ? forTime : recTime);
 
   const emailData = {
     causeNo: record.causeNo,
@@ -113,7 +114,13 @@ const notifyStakeholders = async (
 export const createRecord = async (req: Request, res: Response) => {
   const session = await mongoose.startSession();
   try {
-    const { courtStation, causeNo, nameOfDeceased, dateReceived } = req.body;
+    const {
+      courtStation,
+      causeNo,
+      nameOfDeceased,
+      dateReceived,
+      dateOfReceipt, // Added this to the extraction logic
+    } = req.body;
 
     if (!courtStation || !causeNo || !nameOfDeceased || !dateReceived) {
       return res.status(400).json({ message: "Missing required fields" });
@@ -122,7 +129,6 @@ export const createRecord = async (req: Request, res: Response) => {
     session.startTransaction();
     const nextNo = await getNextSequence("record");
 
-    // We use the model directly to trigger the 'save' hooks for lead times
     const [record] = await Record.create(
       [
         {
@@ -137,7 +143,6 @@ export const createRecord = async (req: Request, res: Response) => {
 
     await session.commitTransaction();
 
-    // Notification logic (non-blocking)
     notifyStakeholders(record.toObject()).catch(console.error);
 
     return res.status(201).json(record);
@@ -173,20 +178,20 @@ export const updateRecord = async (
 export const getAllRecords = async (_req: Request, res: Response) => {
   try {
     const records = await Record.find()
-      // 1. SELECT ONLY the fields needed for the list view
+      // 1. UPDATED: Added dateOfReceipt and lead times to the selection
       .select(
-        "no causeNo nameOfDeceased dateReceived form60Compliance statusAtGP courtStation createdAt",
+        "no causeNo nameOfDeceased dateReceived dateOfReceipt receivingLeadTime forwardingLeadTime form60Compliance statusAtGP courtStation createdAt",
       )
       // 2. Populate only what's necessary
       .populate("courtStation", "name level")
-      // 3. This uses the index we added to the model ({ createdAt: -1 })
+      // 3. This uses the index ({ createdAt: -1 })
       .sort({ createdAt: -1 })
       // 4. Skip Mongoose overhead
       .lean();
 
     return res.status(200).json({
       success: true,
-      count: records.length, // Useful for the frontend to know total count
+      count: records.length,
       records,
     });
   } catch (err) {
