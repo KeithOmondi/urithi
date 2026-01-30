@@ -171,26 +171,35 @@ export const createRecord = async (req: Request, res: Response) => {
 
 
 
-
+//UPDATE
+// 1. UPDATE: Modified to include Audit Trail and Populated User
 export const updateRecord = async (
-  req: Request<{ id: string }>,
+  req: Request<{ id: string }> & { user?: any },
   res: Response,
 ) => {
   try {
+    const updates = Object.keys(req.body);
+    const logMessage = updates.length > 0 
+      ? `Updated: ${updates.join(", ")}` 
+      : "No changes detected";
+
+    const updateData = {
+      ...req.body,
+      updatedBy: req.user?.id, // Capturing WHO from req.user (per your global.ts)
+      lastEditAction: logMessage // Capturing WHAT
+    };
+
     const updated = await Record.findByIdAndUpdate(
       req.params.id,
-      req.body,
-      { new: true, runValidators: true },
-    );
+      updateData,
+      { new: true, runValidators: true }
+    ).populate("updatedBy", "firstName lastName", "pjNumber"); // Crucial for popup names
 
     if (!updated)
       return res.status(404).json({ message: "Record not found" });
 
-    const isForwarding =
-      Object.prototype.hasOwnProperty.call(req.body, "dateForwardedToGP");
-
-    notifyStakeholders(updated.toObject(), isForwarding)
-      .catch(console.error);
+    const isForwarding = Object.prototype.hasOwnProperty.call(req.body, "dateForwardedToGP");
+    notifyStakeholders(updated.toObject(), isForwarding).catch(console.error);
 
     return res.status(200).json(updated);
   } catch (err: any) {
@@ -268,7 +277,7 @@ export const getRecordsByCourt = async (
 ========================================================= */
 
 export const updateMultipleRecordsDateForwarded = async (
-  req: Request<{}, {}, { ids: string[]; date: string }>,
+  req: any, // Bypasses the TSError for req.user
   res: Response,
 ) => {
   try {
@@ -278,6 +287,8 @@ export const updateMultipleRecordsDateForwarded = async (
 
     const validIds = ids.filter((id) => id && Types.ObjectId.isValid(id));
     const newForwardedDate = new Date(date);
+    
+    // Fetch records to get their 'dateReceived' for lead time calculation
     const records = await Record.find({ _id: { $in: validIds } });
 
     const operations = records.map((doc) => ({
@@ -286,20 +297,27 @@ export const updateMultipleRecordsDateForwarded = async (
         update: {
           $set: {
             dateForwardedToGP: newForwardedDate,
-            // Math.abs logic is inside calculateLeadTime
             forwardingLeadTime: calculateLeadTime(
               doc.dateReceived,
               newForwardedDate,
             ),
             statusAtGP: StatusAtGP.PENDING,
+            // AUDIT FIELDS
+            updatedBy: req.user?.id, 
+            lastEditAction: "Batch Update: Forwarded to GP"
           },
         },
       },
     }));
 
+    // Perform the bulk update
     await Record.bulkWrite(operations);
 
-    const updatedRecords = await Record.find({ _id: { $in: validIds } });
+    // Fetch the updated records and populate 'updatedBy' for the frontend UI
+    const updatedRecords = await Record.find({ _id: { $in: validIds } })
+      .populate("updatedBy", "firstName lastName");
+
+    // Trigger email notifications
     updatedRecords.forEach((r) =>
       notifyStakeholders(r, true).catch(console.error),
     );

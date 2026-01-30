@@ -1,4 +1,4 @@
-import mongoose, { Schema, Document, Model, Types } from "mongoose";
+import mongoose, { Schema, Document, Types } from "mongoose";
 import { ICourt } from "./court.model";
 
 export enum Form60Compliance {
@@ -27,6 +27,10 @@ export interface IRecord extends Document {
   volumeNo?: string;
   datePublished?: Date | null;
   kpiAlertSent: boolean;
+  // --- NEW AUDIT FIELDS ---
+  updatedBy?: Types.ObjectId;
+  lastEditAction?: string;
+  // ------------------------
   createdAt: Date;
   updatedAt: Date;
 }
@@ -68,14 +72,13 @@ const recordSchema = new Schema<IRecord>(
     volumeNo: String,
     datePublished: { type: Date, default: null },
     kpiAlertSent: { type: Boolean, default: false },
+    // AUDIT LOG FIELDS
+    updatedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    lastEditAction: String,
   },
   { timestamps: true },
 );
 
-/* =========================
-   COMPOUND UNIQUE INDEX
-   - Prevent same causeNo in the same court
-========================= */
 recordSchema.index({ courtStation: 1, causeNo: 1 }, { unique: true });
 
 /* HOOKS */
@@ -92,21 +95,19 @@ recordSchema.pre("save", function () {
 
 recordSchema.pre("findOneAndUpdate", async function () {
   const update: any = this.getUpdate();
-  const $set = (update.$set ??= {});
+  const $set = (update.$set ??= update); // Handle cases where $set might not be explicitly used
   const current = await this.model.findOne(this.getQuery()).lean();
   if (!current) return;
 
   const recStart = $set.dateOfReceipt ?? current.dateOfReceipt;
   const recEnd = $set.dateReceived ?? current.dateReceived;
-  if (recStart && recEnd) {
+  if (recStart && recEnd)
     $set.receivingLeadTime = calculateLeadTime(recStart, recEnd);
-  }
 
   const fwdEnd = $set.dateForwardedToGP ?? current.dateForwardedToGP;
   const fwdStart = $set.dateReceived ?? current.dateReceived;
-  if (fwdStart && fwdEnd) {
+  if (fwdStart && fwdEnd)
     $set.forwardingLeadTime = calculateLeadTime(fwdStart, fwdEnd);
-  }
 });
 
 export default mongoose.models.Record ||
