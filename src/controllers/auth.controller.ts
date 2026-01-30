@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from "express";
+import crypto from "crypto";
 import { AppError } from "../errors/AppError";
 import { User } from "../models/User";
+import { sendOtp } from "../utils/sendOtp";
 import {
   signAccessToken,
   signRefreshToken,
@@ -8,79 +10,95 @@ import {
   verifyRefreshToken,
 } from "../utils/jwt";
 
-/**
- * Helper to set HttpOnly cookies
- */
+/* =========================================================
+   COOKIE HELPER
+========================================================= */
 const setTokenCookies = (res: Response, user: any) => {
   const payload: TokenPayload = { id: user._id.toString(), role: user.role };
-  
   const accessToken = signAccessToken(payload);
   const refreshToken = signRefreshToken(payload);
 
   const cookieOptions = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === "production", // must be true in prod
-  sameSite: process.env.NODE_ENV === "production" ? "none" as const : "lax" as const,
-  path: "/", // cookie available to all routes
-};
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite:
+      process.env.NODE_ENV === "production"
+        ? ("none" as const)
+        : ("lax" as const),
+    path: "/",
+  };
 
-
-  // Set Access Token (short lived)
   res.cookie("accessToken", accessToken, {
     ...cookieOptions,
-    maxAge: 15 * 60 * 1000, // 15 minutes
+    maxAge: 15 * 60 * 1000,
   });
-
-  // Set Refresh Token (long lived)
   res.cookie("refreshToken", refreshToken, {
     ...cookieOptions,
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    maxAge: 7 * 24 * 60 * 60 * 1000,
   });
-
-  return { accessToken, refreshToken };
 };
 
-/* =====================================
-    LOGIN (Refactored without next())
-===================================== */
-/* =====================================
-    LOGIN
-===================================== */
+/* =========================================================
+   LOGIN — SEND OTP
+========================================================= */
 export const login = async (req: Request, res: Response) => {
-  console.log("--- Login Attempt Start ---");
-  console.log("PJ Number received:", req.body.pjNumber);
-
   try {
-    const { pjNumber, password } = req.body;
+    const { pjNumber } = req.body;
+    if (!pjNumber)
+      return res
+        .status(400)
+        .json({ status: "fail", message: "PJ Number required" });
 
-    if (!pjNumber || !password) {
-      return res.status(400).json({
-        status: "fail",
-        message: "PJ Number and password are required",
-      });
-    }
+    const user = await User.findOne({ pjNumber: pjNumber.toLowerCase() });
+    if (!user || !user.isActive || !user.email)
+      return res
+        .status(200)
+        .json({ status: "success", message: "OTP sent if account exists" });
 
-    const user = await User.findOne({ pjNumber }).select("+password");
-    
-    // Check Existence and Password
-    if (!user || !(await user.comparePassword(password))) {
-      console.warn(`Auth Failed for PJ: ${pjNumber} - Reason: User not found or password mismatch`);
-      return res.status(401).json({
-        status: "fail",
-        message: "Invalid credentials", // THIS IS WHAT THE FRONTEND NEEDS
-      });
-    }
+    await sendOtp(user);
 
-    if (!user.isActive) {
-      return res.status(403).json({
-        status: "fail",
-        message: "Account is deactivated",
-      });
-    }
+    return res
+      .status(200)
+      .json({ status: "success", message: "OTP sent if account exists" });
+  } catch (err) {
+    console.error("Login OTP Error:", err);
+    return res
+      .status(500)
+      .json({ status: "error", message: "Internal server error" });
+  }
+};
+
+/* =========================================================
+   VERIFY OTP
+========================================================= */
+export const verifyOtp = async (req: Request, res: Response) => {
+  try {
+    const { pjNumber, otp } = req.body;
+    if (!pjNumber || !otp)
+      return res
+        .status(400)
+        .json({ status: "fail", message: "PJ Number and OTP required" });
+
+    const hashedOtp = crypto.createHash("sha256").update(otp).digest("hex");
+
+    const user = await User.findOne({
+      pjNumber: pjNumber.toLowerCase(),
+      otp: hashedOtp,
+      otpExpires: { $gt: new Date() },
+    });
+
+    if (!user)
+      return res
+        .status(400)
+        .json({ status: "fail", message: "Invalid or expired OTP" });
+
+    // Clear OTP
+    user.otp = undefined;
+    user.otpExpires = undefined;
+    await user.save({ validateBeforeSave: false });
 
     setTokenCookies(res, user);
 
-    console.log(`Auth Success: ${user.firstName} logged in`);
     return res.status(200).json({
       status: "success",
       message: "Login successful",
@@ -93,46 +111,35 @@ export const login = async (req: Request, res: Response) => {
         },
       },
     });
-    
-  } catch (error: any) {
-    console.error("Critical Login Error:", error);
-    return res.status(500).json({
-      status: "error",
-      message: "An internal server error occurred",
-    });
+  } catch (err) {
+    console.error("OTP Verification Error:", err);
+    return res
+      .status(500)
+      .json({ status: "error", message: "Internal server error" });
   }
 };
 
-
-
-/* =====================================
+/* =========================================================
    REFRESH TOKEN
-===================================== */
+========================================================= */
 export const refreshToken = async (
   req: Request,
   res: Response,
   next: NextFunction,
 ) => {
   try {
-    // 1. Get token from cookies
     const token = req.cookies.refreshToken;
-
     if (!token)
       return next(new AppError("Session expired, please login again", 401));
 
-    // 2. Verify
     const payload = verifyRefreshToken(token);
-
-    // 3. User check
     const user = await User.findById(payload.id);
     if (!user || !user.isActive)
       return next(new AppError("User no longer exists", 401));
 
-    // 4. Set NEW cookies (Rotation)
     setTokenCookies(res, user);
 
-    // 5. Send back the user data so Redux can hydrate the state
-    res.status(200).json({
+    return res.status(200).json({
       status: "success",
       message: "Tokens refreshed",
       data: {
@@ -144,29 +151,18 @@ export const refreshToken = async (
         },
       },
     });
-  } catch (error) {
+  } catch {
     next(new AppError("Invalid refresh token", 401));
   }
 };
 
-/* =====================================
+/* =========================================================
    LOGOUT
-===================================== */
-export const logout = async (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) => {
-  try {
-    // Clear cookies by setting maxAge to 0
-    res.cookie("accessToken", "", { maxAge: 0 });
-    res.cookie("refreshToken", "", { maxAge: 0 });
-
-    res.status(200).json({
-      status: "success",
-      message: "Logged out successfully",
-    });
-  } catch (error) {
-    next(error);
-  }
+========================================================= */
+export const logout = async (_req: Request, res: Response) => {
+  res.cookie("accessToken", "", { maxAge: 0 });
+  res.cookie("refreshToken", "", { maxAge: 0 });
+  res
+    .status(200)
+    .json({ status: "success", message: "Logged out successfully" });
 };

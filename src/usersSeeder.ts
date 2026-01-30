@@ -1,100 +1,83 @@
-/**
- * usersSeeder.ts
- * ----------------------
- * Fully bulletproof seeder for Users.
- * Ensures data goes to the correct DB (env.DB_NAME) and never to `test`.
- */
-
 import "dotenv/config"; // Load .env
 import mongoose from "mongoose";
 import { env } from "./config/env";
+import { User, UserRole } from "./models/User"; // Import User model & enum
 
+// Seed data
 const users = [
   {
     firstName: "Hon. Clara",
     lastName: "Otieno",
-    email: "claraotieno23@gmail.com",
+    email: "kd.omondi1@gmail.com",
     pjNumber: "43244",
-    password: "43244",
-    role: "admin", // or UserRole.ADMIN if enum is available
+    role: UserRole.ADMIN,
   },
   {
     firstName: "Hon. Edith",
     lastName: "Malizu",
     email: "edithmalizu@gmail.com",
-    pjNumber: "10001",
-    password: "10001",
-    role: "user",
+    pjNumber: "46446",
+    role: UserRole.USER,
   },
   {
     firstName: "James",
     lastName: "Kamotho",
     email: "jimkamau177@gmail.com",
     pjNumber: "66242",
-    password: "66242",
-    role: "user",
+    role: UserRole.USER,
   },
   {
     firstName: "Easter",
     lastName: "Kasina",
     email: "essykasina@gmail.com",
     pjNumber: "22400",
-    password: "22400",
-    role: "user",
+    role: UserRole.USER,
   },
   {
     firstName: "Britney",
     lastName: "Ouma",
     email: "oumabritney@gmail.com",
     pjNumber: "000132",
-    password: "000132",
-    role: "user",
+    role: UserRole.USER,
   },
   {
     firstName: "Cynthia",
     lastName: "Atieno",
     email: "cynthia.atieno06@gmail.com",
     pjNumber: "68870",
-    password: "68870",
-    role: "user",
+    role: UserRole.USER,
   },
   {
     firstName: "Dennis",
     lastName: "Isoe",
     email: "johnpaulopenda2005@gmail.com",
     pjNumber: "37293",
-    password: "37293",
-    role: "user",
+    role: UserRole.USER,
   },
 ];
 
 async function seedUsers() {
   try {
-    // 🔥 Connect to MongoDB with explicit DB name
-    await mongoose.connect(env.MONGO_URI, {
-      dbName: env.DB_NAME,
-    });
-
+    // Connect to MongoDB with explicit DB name
+    await mongoose.connect(env.MONGO_URI, { dbName: env.DB_NAME });
     console.log(`✅ Connected to MongoDB: ${mongoose.connection.name}`);
-
-    // Lazy-import the User model AFTER connection
-    const { User } = await import("./models/User");
 
     // Clear existing users
     await User.deleteMany({});
     console.log("🧹 Cleared existing users");
 
-    // Seed users one by one so middleware/hooks run
+    // Seed users one by one so schema hooks run properly
     for (const user of users) {
       await User.create(user);
-      console.log(`👤 Seeded: ${user.firstName} ${user.lastName}`);
+      console.log(`👤 Seeded: ${user.firstName} ${user.lastName} (${user.pjNumber})`);
     }
 
     console.log("🎉 Successfully seeded users");
 
-    // Disconnect cleanly
+    // Disconnect
     await mongoose.disconnect();
     console.log("🟡 MongoDB disconnected");
+
     process.exit(0);
   } catch (err) {
     console.error("❌ Seeding error:", err);

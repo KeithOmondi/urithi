@@ -36,7 +36,9 @@ const notifyStakeholders = async (
 ) => {
   const [court, admins] = await Promise.all([
     Court.findById(record.courtStation).lean<ICourt>(),
-    User.find({ role: "Admin", accountVerified: true }).select("email").lean(),
+    User.find({ role: "Admin", accountVerified: true })
+      .select("email")
+      .lean(),
   ]);
 
   const adminEmails = admins.map((a) => a.email);
@@ -50,7 +52,10 @@ const notifyStakeholders = async (
     calculateLeadTime(record.dateOfReceipt, record.dateReceived) ?? 0;
 
   const forTime =
-    calculateLeadTime(record.dateReceived, record.dateForwardedToGP) ?? 0;
+    calculateLeadTime(
+      record.dateReceived,
+      record.dateForwardedToGP,
+    ) ?? 0;
 
   const currentLeadTime = Math.abs(isForwarding ? forTime : recTime);
 
@@ -100,6 +105,7 @@ const notifyStakeholders = async (
   await Promise.allSettled(jobs);
 };
 
+
 export const createRecord = async (req: Request, res: Response) => {
   const { causeNo } = req.body as CreateRecordBody; // <-- make sure causeNo is accessible
   const session = await mongoose.startSession();
@@ -139,7 +145,7 @@ export const createRecord = async (req: Request, res: Response) => {
           kpiAlertSent: false,
         },
       ],
-      { session },
+      { session }
     );
 
     await session.commitTransaction();
@@ -151,11 +157,7 @@ export const createRecord = async (req: Request, res: Response) => {
     if (session.inTransaction()) await session.abortTransaction();
 
     // Fix: reference causeNo from above
-    if (
-      err.code === 11000 &&
-      err.keyPattern?.courtStation &&
-      err.keyPattern?.causeNo
-    ) {
+    if (err.code === 11000 && err.keyPattern?.courtStation && err.keyPattern?.causeNo) {
       return res.status(400).json({
         message: `Cause number "${causeNo}" already exists for this court.`,
       });
@@ -167,30 +169,35 @@ export const createRecord = async (req: Request, res: Response) => {
   }
 };
 
+
+
+
 export const updateRecord = async (
   req: Request<{ id: string }>,
   res: Response,
 ) => {
   try {
-    const updated = await Record.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-      runValidators: true,
-    });
-
-    if (!updated) return res.status(404).json({ message: "Record not found" });
-
-    const isForwarding = Object.prototype.hasOwnProperty.call(
+    const updated = await Record.findByIdAndUpdate(
+      req.params.id,
       req.body,
-      "dateForwardedToGP",
+      { new: true, runValidators: true },
     );
 
-    notifyStakeholders(updated.toObject(), isForwarding).catch(console.error);
+    if (!updated)
+      return res.status(404).json({ message: "Record not found" });
+
+    const isForwarding =
+      Object.prototype.hasOwnProperty.call(req.body, "dateForwardedToGP");
+
+    notifyStakeholders(updated.toObject(), isForwarding)
+      .catch(console.error);
 
     return res.status(200).json(updated);
   } catch (err: any) {
     return res.status(500).json({ message: err.message });
   }
 };
+
 
 export const getAllRecords = async (_req: Request, res: Response) => {
   try {
@@ -209,7 +216,7 @@ export const getAllRecords = async (_req: Request, res: Response) => {
         statusAtGP
         courtStation
         createdAt
-        `,
+        `
       )
       .populate("courtStation", "name level")
       .sort({ createdAt: -1 })
@@ -224,6 +231,7 @@ export const getAllRecords = async (_req: Request, res: Response) => {
     return res.status(500).json({ message: "Failed to fetch records" });
   }
 };
+
 
 export const getRecordById = async (
   req: Request<{ id: string }>,
@@ -414,7 +422,7 @@ export const getRecordsForAdmin = async (req: Request, res: Response) => {
           statusAtGP
           courtStation
           createdAt
-          `,
+          `
         )
         .populate("courtStation", "name level")
         .sort({ createdAt: -1 })
@@ -437,6 +445,7 @@ export const getRecordsForAdmin = async (req: Request, res: Response) => {
     return res.status(500).json({ message: "Admin fetch failure" });
   }
 };
+
 
 export const getAdvancedReports = async (_req: Request, res: Response) => {
   try {

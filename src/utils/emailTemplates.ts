@@ -116,4 +116,51 @@ export const emailTemplates = {
       </div>
     `,
   }),
+
+  loginOtp: (otp: string): BaseEmail => ({
+    subject: "Login Verification Code",
+    html: `
+    <div style="${containerStyle}">
+      <div style="${headerStyle}">
+        <img src="${LOGO_URL}" alt="Judiciary Logo" style="height: 60px; margin-bottom: 10px;" />
+        <h2 style="margin: 0; font-size: 18px; text-transform: uppercase; letter-spacing: 2px;">
+          Secure Login
+        </h2>
+        <p style="margin: 5px 0 0 0; font-size: 11px; opacity: 0.9;">
+          Republic of Kenya | The Judiciary
+        </p>
+      </div>
+
+      <div style="padding: 30px; color: ${NEUTRAL_SLATE};">
+        <p>Please use the One-Time Password (OTP) below to complete your login:</p>
+
+        <div style="
+          background:#f8fafc;
+          border:1px solid #e2e8f0;
+          padding:20px;
+          text-align:center;
+          margin:25px 0;
+          border-radius:6px;
+          font-size:32px;
+          letter-spacing:6px;
+          font-weight:bold;
+          color:${JUDICIAL_GREEN};
+        ">
+          ${otp}
+        </div>
+
+        <p>This code expires in <strong>5 minutes</strong>.</p>
+
+        <p style="font-size:13px; color:#64748b;">
+          If you did not attempt to log in, kindly ignore this email.
+        </p>
+
+        <p style="margin-top:25px; font-weight:bold; color:${JUDICIAL_GREEN};">
+          Regards,<br/>
+          Principal Registry Team
+        </p>
+      </div>
+    </div>
+  `,
+  }),
 };

@@ -4,13 +4,15 @@ import {
   login,
   refreshToken,
   logout,
+  verifyOtp,
 } from "../controllers/auth.controller";
 import { protect } from "../middlewares/auth.middleware";
 
 const router = Router();
 
 router.post("/login", login);
-router.post("/refresh", refreshToken);
-router.post("/logout", protect, logout);
+router.post("/verify-otp", verifyOtp);
+router.post("/refresh-token", refreshToken);
+router.post("/logout", logout);
 
 export default router;
