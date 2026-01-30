@@ -60,12 +60,15 @@ const notifyStakeholders = async (
   const currentLeadTime = Math.abs(isForwarding ? forTime : recTime);
 
   const emailData = {
-    causeNo: record.causeNo,
-    deceasedName: record.nameOfDeceased,
-    courtName: court?.name || "Registry Station",
-    reason: record.rejectionReason || "No reason provided",
-    leadTime: currentLeadTime,
-  };
+  causeNo: record.causeNo,
+  deceasedName: record.nameOfDeceased,
+  courtName: court?.name || "Registry Station",
+  reason: record.rejectionReason || "No reason provided",
+  leadTime: currentLeadTime,
+  approvalDate: record.dateReceived || record.updatedAt,
+};
+
+
 
   const jobs: Promise<any>[] = [];
 
