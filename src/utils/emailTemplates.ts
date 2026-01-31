@@ -135,44 +135,46 @@ export const emailTemplates = {
   }),
 
   /* ======================================================
-     RECORD REJECTED
-  ====================================================== */
-  recordRejected: (data: TemplateData): BaseEmail => ({
-    subject: `REJECTION NOTICE: Cause No. ${data.causeNo}`,
-    html: `
-      <div style="${containerStyle}">
-        <div style="${headerStyle};background-color:${REJECTION_RED};">
-          <img src="${LOGO_URL}" alt="Judiciary Logo" style="height:60px;margin-bottom:10px;" />
-          <h2 style="margin:0;font-size:18px;text-transform:uppercase;">
-            Compliance Rejection
-          </h2>
-        </div>
-
-        <div style="padding:30px;color:${NEUTRAL_SLATE};">
-
-          <p>
-            The submission for <strong>${data.causeNo}</strong> has been rejected
-            due to discrepancies in Form 60 compliance.
-          </p>
-
-          <p>
-            <strong>Date of Rejection:</strong>
-            ${formatDate(data.approvalDate)}
-          </p>
-
-          <div style="background:#fff1f2;border-left:4px solid ${REJECTION_RED};padding:20px;margin:20px 0;">
-            <p style="margin:0;font-weight:bold;color:${REJECTION_RED};">
-              ${data.reason || "Refer to manual verification notes."}
-            </p>
-          </div>
-
-          <p>Kindly rectify and resubmit.</p>
-
-          ${footerHtml}
-        </div>
+   RECORD REJECTED
+====================================================== */
+recordRejected: (data: TemplateData): BaseEmail => ({
+  subject: `REJECTION NOTICE: Cause No. ${data.causeNo}`,
+  html: `
+    <div style="${containerStyle}">
+      <div style="${headerStyle};background-color:${REJECTION_RED};">
+        <img src="${LOGO_URL}" alt="Judiciary Logo" style="height:60px;margin-bottom:10px;" />
+        <h2 style="margin:0;font-size:18px;text-transform:uppercase;">
+          Compliance Rejection
+        </h2>
       </div>
-    `,
-  }),
+
+      <div style="padding:30px;color:${NEUTRAL_SLATE};">
+
+        <p>
+          The submission for <strong>${data.causeNo}</strong> 
+          (<strong>${data.deceasedName}</strong>) has been rejected
+          due to discrepancies in Form 60 compliance.
+        </p>
+
+        <p>
+          <strong>Date of Rejection:</strong>
+          ${formatDate(data.approvalDate)}
+        </p>
+
+        <div style="background:#fff1f2;border-left:4px solid ${REJECTION_RED};padding:20px;margin:20px 0;">
+          <p style="margin:0;font-weight:bold;color:${REJECTION_RED};">
+            ${data.reason || "Refer to manual verification notes."}
+          </p>
+        </div>
+
+        <p>Kindly rectify and resubmit.</p>
+
+        ${footerHtml}
+      </div>
+    </div>
+  `,
+})
+,
 
   /* ======================================================
      LEAD TIME WARNING

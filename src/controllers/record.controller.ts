@@ -27,13 +27,15 @@ interface CreateRecordBody {
 }
 
 /* =========================================================
-    INTERNAL HELPERS
+   INTERNAL HELPERS
 ========================================================= */
 
 const notifyStakeholders = async (
   record: any,
-  isForwarding: boolean = false,
+  options?: { isForwarding?: boolean; checkKpi?: boolean },
 ) => {
+  const { isForwarding = false, checkKpi = false } = options || {};
+
   const [court, admins] = await Promise.all([
     Court.findById(record.courtStation).lean<ICourt>(),
     User.find({ role: "Admin", accountVerified: true })
@@ -45,73 +47,72 @@ const notifyStakeholders = async (
   const courtEmail = court?.primaryEmail;
   const recipients = [...adminEmails, courtEmail].filter(Boolean) as string[];
 
-  /**
-   * SAFETY: Always compute from source dates
-   */
-  const recTime =
+  const receiptLeadTime =
     calculateLeadTime(record.dateOfReceipt, record.dateReceived) ?? 0;
 
-  const forTime =
-    calculateLeadTime(
-      record.dateReceived,
-      record.dateForwardedToGP,
-    ) ?? 0;
-
-  const currentLeadTime = Math.abs(isForwarding ? forTime : recTime);
+  const forwardingLeadTime =
+    calculateLeadTime(record.dateReceived, record.dateForwardedToGP) ?? 0;
 
   const emailData = {
-  causeNo: record.causeNo,
-  deceasedName: record.nameOfDeceased,
-  courtName: court?.name || "Registry Station",
-  reason: record.rejectionReason || "No reason provided",
-  leadTime: currentLeadTime,
-  approvalDate: record.dateReceived || record.updatedAt,
-};
-
-
+    causeNo: record.causeNo,
+    deceasedName: record.nameOfDeceased,
+    courtName: court?.name || "Registry Station",
+    reason: record.rejectionReason || "No reason provided",
+    leadTime: isForwarding ? forwardingLeadTime : receiptLeadTime,
+    approvalDate: record.dateReceived || record.updatedAt,
+  };
 
   const jobs: Promise<any>[] = [];
 
-  /* KPI ALERT (> 30 DAYS) */
-  if (currentLeadTime > 30 && !record.kpiAlertSent) {
-    const warning = emailTemplates.leadTimeWarning({
-      causeNo: record.causeNo,
-      leadTime: currentLeadTime,
-      deceasedName: record.nameOfDeceased,
-      courtName: court?.name || "Registry Station",
-    });
+  /* KPI ONLY ON CREATE */
+  if (checkKpi && receiptLeadTime > 30 && !record.kpiAlertSent) {
+    const warning = emailTemplates.leadTimeWarning(emailData);
 
-    adminEmails.forEach((email) => {
+    adminEmails.forEach((email) =>
       jobs.push(
-        sendMail({ to: email, subject: warning.subject, html: warning.html }),
-      );
-    });
+        sendMail({
+          to: email,
+          subject: warning.subject,
+          html: warning.html,
+        }),
+      ),
+    );
 
     await Record.findByIdAndUpdate(record._id, {
       $set: { kpiAlertSent: true },
     });
   }
 
-  /* STANDARD NOTIFICATIONS */
-  const template = isForwarding
-    ? emailTemplates.recordForwarded(emailData)
-    : record.form60Compliance === Form60Compliance.REJECTED
-      ? emailTemplates.recordRejected(emailData)
-      : emailTemplates.recordApproved(emailData);
+  let template;
+  if (isForwarding) {
+    template = emailTemplates.recordForwarded(emailData);
+  } else if (record.form60Compliance === Form60Compliance.REJECTED) {
+    template = emailTemplates.recordRejected(emailData);
+  } else {
+    template = emailTemplates.recordApproved(emailData);
+  }
 
-  recipients.forEach((email) => {
+  recipients.forEach((email) =>
     jobs.push(
-      sendMail({ to: email, subject: template.subject, html: template.html }),
-    );
-  });
+      sendMail({
+        to: email,
+        subject: template.subject,
+        html: template.html,
+      }),
+    ),
+  );
 
   await Promise.allSettled(jobs);
 };
 
+/* =========================================================
+   CREATE
+========================================================= */
 
 export const createRecord = async (req: Request, res: Response) => {
-  const { causeNo } = req.body as CreateRecordBody; // <-- make sure causeNo is accessible
+  const { causeNo } = req.body as CreateRecordBody;
   const session = await mongoose.startSession();
+
   try {
     const {
       courtStation,
@@ -123,12 +124,12 @@ export const createRecord = async (req: Request, res: Response) => {
       rejectionReason,
     } = req.body as CreateRecordBody;
 
-    // Validate required fields
     if (!courtStation || !causeNo || !nameOfDeceased || !dateReceived) {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
     session.startTransaction();
+
     const nextNo = await getNextSequence("record");
 
     const [record] = await Record.create(
@@ -148,19 +149,22 @@ export const createRecord = async (req: Request, res: Response) => {
           kpiAlertSent: false,
         },
       ],
-      { session }
+      { session },
     );
 
     await session.commitTransaction();
 
-    notifyStakeholders(record.toObject()).catch(console.error);
+    notifyStakeholders(record.toObject(), { checkKpi: true }).catch(console.error);
 
     return res.status(201).json(record);
   } catch (err: any) {
     if (session.inTransaction()) await session.abortTransaction();
 
-    // Fix: reference causeNo from above
-    if (err.code === 11000 && err.keyPattern?.courtStation && err.keyPattern?.causeNo) {
+    if (
+      err.code === 11000 &&
+      err.keyPattern?.courtStation &&
+      err.keyPattern?.causeNo
+    ) {
       return res.status(400).json({
         message: `Cause number "${causeNo}" already exists for this court.`,
       });
@@ -172,50 +176,54 @@ export const createRecord = async (req: Request, res: Response) => {
   }
 };
 
+/* =========================================================
+   UPDATE (SAFE PATCH STYLE)
+========================================================= */
 
-
-//UPDATE
-// 1. UPDATE: Modified to include Audit Trail and Populated User
 export const updateRecord = async (
   req: Request<{ id: string }> & { user?: any },
   res: Response,
 ) => {
   try {
+    const record = await Record.findById(req.params.id);
+    if (!record) return res.status(404).json({ message: "Record not found" });
+
     const updates = Object.keys(req.body);
-    const logMessage = updates.length > 0 
-      ? `Updated: ${updates.join(", ")}` 
-      : "No changes detected";
+    const logMessage = updates.length > 0 ? `Updated: ${updates.join(", ")}` : "No changes detected";
 
-    const updateData = {
-      ...req.body,
-      updatedBy: req.user?.id, // Capturing WHO from req.user (per your global.ts)
-      lastEditAction: logMessage // Capturing WHAT
-    };
+    // Apply updates
+    Object.assign(record, req.body);
 
-    const updated = await Record.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true, runValidators: true }
-    ).populate("updatedBy", "firstName lastName", "pjNumber"); // Crucial for popup names
+    // Audit fields
+    record.updatedBy = req.user?.id;
+    record.lastEditAction = logMessage;
 
-    if (!updated)
-      return res.status(404).json({ message: "Record not found" });
+    await record.save(); // triggers pre-save hooks
 
-    const isForwarding = Object.prototype.hasOwnProperty.call(req.body, "dateForwardedToGP");
-    notifyStakeholders(updated.toObject(), isForwarding).catch(console.error);
+    // Populate after save
+    await record.populate("courtStation", "name level");
+    await record.populate("updatedBy", "firstName lastName pjNumber");
 
-    return res.status(200).json(updated);
+    const isForwarding = "dateForwardedToGP" in req.body;
+
+    notifyStakeholders(record.toObject(), { isForwarding, checkKpi: false }).catch(console.error);
+
+    return res.status(200).json(record);
   } catch (err: any) {
     return res.status(500).json({ message: err.message });
   }
 };
 
 
+
+/* =========================================================
+   FETCH ALL (ADMIN SAFE)
+========================================================= */
+
 export const getAllRecords = async (_req: Request, res: Response) => {
   try {
     const records = await Record.find()
-      .select(
-        `
+      .select(`
         no
         causeNo
         nameOfDeceased
@@ -225,12 +233,16 @@ export const getAllRecords = async (_req: Request, res: Response) => {
         receivingLeadTime
         forwardingLeadTime
         form60Compliance
+        rejectionReason
         statusAtGP
         courtStation
+        updatedBy
+        lastEditAction
         createdAt
-        `
-      )
+        updatedAt
+      `)
       .populate("courtStation", "name level")
+      .populate("updatedBy", "firstName lastName pjNumber")
       .sort({ createdAt: -1 })
       .lean();
 
@@ -244,6 +256,9 @@ export const getAllRecords = async (_req: Request, res: Response) => {
   }
 };
 
+/* =========================================================
+   FETCH ONE
+========================================================= */
 
 export const getRecordById = async (
   req: Request<{ id: string }>,
@@ -252,14 +267,80 @@ export const getRecordById = async (
   try {
     const record = await Record.findById(req.params.id)
       .populate("courtStation", "name level")
+      .populate("updatedBy", "firstName lastName pjNumber")
       .lean();
+
     if (!record) return res.status(404).json({ message: "Record not found" });
+
     return res.status(200).json(record);
   } catch {
     return res.status(500).json({ message: "Failed to fetch record" });
   }
 };
 
+/* =========================================================
+   BULK UPDATE (SAFE)
+========================================================= */
+
+export const updateMultipleRecordsDateForwarded = async (
+  req: any,
+  res: Response,
+) => {
+  try {
+    const { ids, date } = req.body;
+
+    const validIds = ids.filter((id: string) => Types.ObjectId.isValid(id));
+
+    const newForwardedDate = new Date(date);
+
+    const records = await Record.find({ _id: { $in: validIds } });
+
+    const operations = records.map((doc) => ({
+      updateOne: {
+        filter: { _id: doc._id },
+        update: {
+          $set: {
+            dateForwardedToGP: newForwardedDate,
+            forwardingLeadTime: calculateLeadTime(
+              doc.dateReceived,
+              newForwardedDate,
+            ),
+            statusAtGP: StatusAtGP.PENDING,
+            updatedBy: req.user?.id,
+            lastEditAction: "Batch Update: Forwarded to GP",
+          },
+        },
+      },
+    }));
+
+    await Record.bulkWrite(operations);
+
+    const updatedRecords = await Record.find({
+      _id: { $in: validIds },
+    })
+      .populate("courtStation", "name level")
+      .populate("updatedBy", "firstName lastName pjNumber");
+
+    updatedRecords.forEach((r) =>
+      notifyStakeholders(r.toObject(), {
+        isForwarding: true,
+        checkKpi: false,
+      }).catch(console.error),
+    );
+
+    return res.status(200).json({
+      success: true,
+      modifiedCount: operations.length,
+      records: updatedRecords,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ message: err.message });
+  }
+};
+
+/*==============================================
+GET RECORDS BY COURT
+================================================*/
 export const getRecordsByCourt = async (
   req: Request<{ courtId: string }>,
   res: Response,
@@ -275,65 +356,6 @@ export const getRecordsByCourt = async (
   }
 };
 
-/* =========================================================
-    BULK & REPORTING OPERATIONS
-========================================================= */
-
-export const updateMultipleRecordsDateForwarded = async (
-  req: any, // Bypasses the TSError for req.user
-  res: Response,
-) => {
-  try {
-    const { ids, date } = req.body;
-    if (!ids || !Array.isArray(ids))
-      return res.status(400).json({ message: "Invalid 'ids' array." });
-
-    const validIds = ids.filter((id) => id && Types.ObjectId.isValid(id));
-    const newForwardedDate = new Date(date);
-    
-    // Fetch records to get their 'dateReceived' for lead time calculation
-    const records = await Record.find({ _id: { $in: validIds } });
-
-    const operations = records.map((doc) => ({
-      updateOne: {
-        filter: { _id: doc._id },
-        update: {
-          $set: {
-            dateForwardedToGP: newForwardedDate,
-            forwardingLeadTime: calculateLeadTime(
-              doc.dateReceived,
-              newForwardedDate,
-            ),
-            statusAtGP: StatusAtGP.PENDING,
-            // AUDIT FIELDS
-            updatedBy: req.user?.id, 
-            lastEditAction: "Batch Update: Forwarded to GP"
-          },
-        },
-      },
-    }));
-
-    // Perform the bulk update
-    await Record.bulkWrite(operations);
-
-    // Fetch the updated records and populate 'updatedBy' for the frontend UI
-    const updatedRecords = await Record.find({ _id: { $in: validIds } })
-      .populate("updatedBy", "firstName lastName");
-
-    // Trigger email notifications
-    updatedRecords.forEach((r) =>
-      notifyStakeholders(r, true).catch(console.error),
-    );
-
-    return res.status(200).json({
-      success: true,
-      modifiedCount: operations.length,
-      records: updatedRecords,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ message: err.message });
-  }
-};
 
 /* =========================================================
     ULTRA-FAST STATISTICS (1 Query instead of 7)
@@ -443,7 +465,7 @@ export const getRecordsForAdmin = async (req: Request, res: Response) => {
           statusAtGP
           courtStation
           createdAt
-          `
+          `,
         )
         .populate("courtStation", "name level")
         .sort({ createdAt: -1 })
@@ -466,7 +488,6 @@ export const getRecordsForAdmin = async (req: Request, res: Response) => {
     return res.status(500).json({ message: "Admin fetch failure" });
   }
 };
-
 
 export const getAdvancedReports = async (_req: Request, res: Response) => {
   try {
