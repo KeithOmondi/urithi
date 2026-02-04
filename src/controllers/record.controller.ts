@@ -567,3 +567,81 @@ export const deleteRecord = async (
     return res.status(500).json({ message: "Delete failed" });
   }
 };
+
+
+/* =========================================================
+    ANALYTICS (Corrected Types)
+========================================================= */
+
+export const getAnalytics = async (req: Request, res: Response) => {
+  try {
+    const { courtId } = req.query;
+    const matchQuery = courtId && courtId !== "all" 
+      ? { courtStation: new Types.ObjectId(courtId as string) } 
+      : {};
+
+    const stats = await Record.aggregate([
+      {
+        $facet: {
+          summary: [
+            { $match: matchQuery },
+            {
+              $group: {
+                _id: null,
+                totalRecords: { $sum: 1 },
+                compliantCount: { $sum: { $cond: [{ $eq: ["$form60Compliance", "Approved"] }, 1, 0] } },
+                nonCompliantCount: { $sum: { $cond: [{ $eq: ["$form60Compliance", "Rejected"] }, 1, 0] } },
+                pendingForwarding: { $sum: { $cond: [{ $eq: ["$statusAtGP", "Pending"] }, 1, 0] } },
+                averageLeadTime: { $avg: "$forwardingLeadTime" }
+              }
+            }
+          ],
+          courtPerformance: [
+            // 1. Group by the Court ID
+            {
+              $group: {
+                _id: "$courtStation",
+                count: { $sum: 1 },
+                complianceRate: { 
+                  $avg: { $cond: [{ $eq: ["$form60Compliance", "Approved"] }, 100, 0] } 
+                }
+              }
+            },
+            // 2. Join with the Courts collection to get the name
+            {
+              $lookup: {
+                from: "courts", // MUST match the actual name of your courts collection in MongoDB
+                localField: "_id",
+                foreignField: "_id",
+                as: "courtDetails"
+              }
+            },
+            // 3. Convert the courtDetails array into a single object
+            { $unwind: "$courtDetails" },
+            // 4. Project the final fields (Replace the ID with the actual name)
+            {
+              $project: {
+                _id: 1,
+                count: 1,
+                complianceRate: { $round: ["$complianceRate", 1] },
+                courtName: "$courtDetails.name" // This is where the actual name comes from
+              }
+            },
+            { $sort: { count: -1 } }
+          ]
+        }
+      }
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      data: stats[0]
+    });
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Internal Server Error";
+    return res.status(500).json({ 
+      message: "Analytics aggregation failed", 
+      error: errorMessage 
+    });
+  }
+};

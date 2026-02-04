@@ -11,6 +11,7 @@ import {
   getRecordStats,
   getRecordsByCourt,
   updateMultipleRecordsDateForwarded,
+  getAnalytics,
 } from "../controllers/record.controller";
 import { protect, restrictTo } from "../middlewares/auth.middleware";
 
@@ -42,5 +43,7 @@ router.post("/verify", protect, verifyRecords);
 
 // Get a record by ID
 router.get("/get/:id", protect, getRecordById);
+
+router.get("/analytics", protect, restrictTo("admin"), getAnalytics);
 
 export default router;

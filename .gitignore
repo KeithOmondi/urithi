@@ -14,3 +14,9 @@ yarn-error.log*
 # OS specific files
 .DS_Store
 Thumbs.db
+
+# Ignore seedCourts scripts
+src/seedCourts.ts
+
+# Ignore seedCourts scripts
+src/userSeeder.ts
