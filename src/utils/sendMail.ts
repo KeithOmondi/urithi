@@ -61,7 +61,7 @@ export const sendMail = async ({
       : [{ email: to }];
 
     const defaultCC = includeDefaultCC
-      ? [{ email: "kd.omondi1@gmail.com" }]
+      ? [{ email: "principalregistry@court.go.ke" }]
       : [];
 
     const ccList = cc
