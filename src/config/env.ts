@@ -61,6 +61,7 @@ export const env = {
   // ✅ EMAIL
   MAIL_FROM_NAME: process.env.MAIL_FROM_NAME as string,
   MAIL_FROM_EMAIL: process.env.MAIL_FROM_EMAIL as string,
+  DEFAULT_CC_EMAIL: process.env.DEFAULT_CC_EMAIL as string,
 
   // ✅ APP INFO
   APP_VERSION: process.env.APP_VERSION || "dev",
