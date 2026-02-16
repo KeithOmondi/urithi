@@ -44,48 +44,91 @@ const footerHtml = `
 `;
 
 export const emailTemplates = {
-  /* ======================================================
+   /* ======================================================
+
      RECORD APPROVED / RECEIVED
+
   ====================================================== */
+
   recordApproved: (data: TemplateData): BaseEmail => ({
-    subject: `INORDINATE DELAY: Cause No. ${data.causeNo}`,
+
+    subject: `ACKNOWLEDGMENT OF RECEIPT: Cause No. ${data.causeNo}`,
+
     html: `
+
       <div style="${containerStyle}">
+
         <div style="${headerStyle}">
+
           <img src="${LOGO_URL}" alt="Judiciary Logo" style="height:60px;margin-bottom:10px;" />
+
           <h2 style="margin:0;font-size:18px;text-transform:uppercase;letter-spacing:2px;">
+
             Principal Registry
+
           </h2>
+
           <p style="margin:5px 0 0;font-size:11px;opacity:.9;">
+
             Republic of Kenya | The Judiciary
+
           </p>
+
         </div>
+
+
 
         <div style="padding:30px;color:${NEUTRAL_SLATE};">
 
+
+
           <p>
+
             This is to acknowledge that the Principal Registry has received and
+
             verified the following record from <strong>${data.courtName}</strong>:
+
           </p>
+
+
 
           <div style="background:#f8fafc;border:1px solid #e2e8f0;padding:20px;margin:20px 0;border-radius:6px;">
+
             <strong>Cause Number:</strong> ${data.causeNo}<br/>
+
             <strong>Name of Deceased:</strong>
+
             <span style="text-transform:uppercase;">${data.deceasedName}</span><br/>
+
             <strong>Date Approved:</strong> ${formatDate(data.approvalDate)}
+
           </div>
 
+
+
           <p>
+
             The record is now awaiting transmission to the Government Printer
+
             for gazettement. You will receive a further notification once the
+
             document has been forwarded.
+
           </p>
 
+
+
           ${footerHtml}
+
         </div>
+
       </div>
+
     `,
+
   }),
+
+
 
   /* ======================================================
     RECORD FORWARDED TO GP (Updated)
@@ -182,7 +225,7 @@ recordForwarded: (data: TemplateData): BaseEmail => ({
 ====================================================== */
 leadTimeWarning: (data: TemplateData): BaseEmail => ({
   // Updated subject to focus on the specific Court Station
-  subject: `DELIVERY ALERT: ${data.courtName} | Cause No. ${data.causeNo}`,
+  subject: `INORDINATE DELAY: ${data.courtName} | Cause No. ${data.causeNo}`,
   html: `
     <div style="${containerStyle}">
       <div style="${headerStyle};background-color:#013220;color:#ffffff;">
