@@ -177,15 +177,15 @@ recordRejected: (data: TemplateData): BaseEmail => ({
 ,
 
   /* ======================================================
-     LEAD TIME WARNING
+      LEAD TIME WARNING
   ====================================================== */
   leadTimeWarning: (data: TemplateData): BaseEmail => ({
     subject: `INORDINATE DELAY: Cause No. ${data.causeNo}`,
     html: `
       <div style="${containerStyle}">
-        <div style="${headerStyle};background-color:${WARNING_AMBER};">
+        <div style="${headerStyle};background-color:#013220;color:#ffffff;">
           <img src="${LOGO_URL}" alt="Judiciary Logo" style="height:60px;margin-bottom:10px;" />
-          <h2 style="margin:0;font-size:18px;text-transform:uppercase;">
+          <h2 style="margin:0;font-size:18px;text-transform:uppercase;color:#ffffff;">
             Service Delivery Alert
           </h2>
         </div>
