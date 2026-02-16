@@ -137,9 +137,9 @@ export const emailTemplates = {
   /* ======================================================
    RECORD REJECTED
 ====================================================== */
-recordRejected: (data: TemplateData): BaseEmail => ({
-  subject: `REJECTION NOTICE: Cause No. ${data.causeNo}`,
-  html: `
+  recordRejected: (data: TemplateData): BaseEmail => ({
+    subject: `REJECTION NOTICE: Cause No. ${data.causeNo}`,
+    html: `
     <div style="${containerStyle}">
       <div style="${headerStyle};background-color:${REJECTION_RED};">
         <img src="${LOGO_URL}" alt="Judiciary Logo" style="height:60px;margin-bottom:10px;" />
@@ -173,50 +173,56 @@ recordRejected: (data: TemplateData): BaseEmail => ({
       </div>
     </div>
   `,
-})
-,
-
-  /* ======================================================
-      LEAD TIME WARNING
-  ====================================================== */
-  leadTimeWarning: (data: TemplateData): BaseEmail => ({
-    subject: `INORDINATE DELAY: Cause No. ${data.causeNo}`,
-    html: `
-      <div style="${containerStyle}">
-        <div style="${headerStyle};background-color:#013220;color:#ffffff;">
-          <img src="${LOGO_URL}" alt="Judiciary Logo" style="height:60px;margin-bottom:10px;" />
-          <h2 style="margin:0;font-size:18px;text-transform:uppercase;color:#ffffff;">
-            Service Delivery Alert
-          </h2>
-        </div>
-
-        <div style="padding:40px;color:${NEUTRAL_SLATE};text-align:justify;">
-
-          <p>Your Honour,</p>
-
-          <p>
-            <strong>Date Observed:</strong>
-            ${formatDate(data.approvalDate)}
-          </p>
-
-          <p>
-            We note that the notices for <strong>${data.causeNo}</strong>
-            were received <strong>${data.leadTime} days</strong> after receipt
-            on e-Citizen. This exceeds the 14-day standard mandated by the
-            <strong>STAJ Vision</strong>.
-          </p>
-
-          <p>
-            Please ensure future compliance with Judicial Service Delivery
-            Standards.
-          </p>
-
-          ${footerHtml}
-        </div>
-      </div>
-    `,
   }),
 
+
+ /* ======================================================
+    LEAD TIME WARNING (Updated)
+====================================================== */
+leadTimeWarning: (data: TemplateData): BaseEmail => ({
+  // Updated subject to focus on the specific Court Station
+  subject: `DELIVERY ALERT: ${data.courtName} | Cause No. ${data.causeNo}`,
+  html: `
+    <div style="${containerStyle}">
+      <div style="${headerStyle};background-color:#013220;color:#ffffff;">
+        <img src="${LOGO_URL}" alt="Judiciary Logo" style="height:60px;margin-bottom:10px;" />
+        <h2 style="margin:0;font-size:18px;text-transform:uppercase;color:#ffffff;">
+          Service Delivery Alert
+        </h2>
+      </div>
+
+      <div style="padding:40px;color:${NEUTRAL_SLATE};text-align:justify;">
+
+        <p>Your Honour,</p>
+
+        <p>
+          <strong>Station:</strong> ${data.courtName}<br/>
+          <strong>Date Observed:</strong> ${formatDate(data.approvalDate)}
+        </p>
+
+        <div style="background:#fffcf0; border-left:4px solid ${WARNING_AMBER}; padding:15px; margin:20px 0;">
+          <p style="margin:0;">
+            We note that the notices for <strong>${data.causeNo}</strong> 
+            (Deceased: ${data.deceasedName}) were received 
+            <strong>${data.leadTime} days</strong> after receipt on e-Citizen.
+          </p>
+        </div>
+
+        <p>
+          This timeline exceeds the <strong>14-day standard</strong> mandated by the 
+          <strong>STAJ Vision</strong>.
+        </p>
+
+        <p>
+          Please ensure future compliance with Judicial Service Delivery 
+          Standards at <strong>${data.courtName}</strong>.
+        </p>
+
+        ${footerHtml}
+      </div>
+    </div>
+  `,
+}),
   /* ======================================================
      LOGIN OTP
   ====================================================== */
