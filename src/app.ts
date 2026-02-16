@@ -10,7 +10,9 @@ import recordRoutes from "./routes/record.routes";
 import courtRoutes from "./routes/court.routes";
 import reportRoutes from "./routes/report.routes";
 import userRoutes from "./routes/user.routes";
-import scanRoutes from "./routes/scan.routes"
+import scanRoutes from "./routes/scan.routes";
+import  adminRoutes from "./routes/admin.routes";
+import goRoutes from "./routes/gp.routes"
 import { env } from "./config/env";
 
 const app = express();
@@ -21,17 +23,16 @@ const app = express();
 
 app.use(
   cors({
-    origin: env.FRONTEND_URL,  // frontend domain
-    credentials: true,         // allow cookies / credentials
+    origin: env.FRONTEND_URL, // frontend domain
+    credentials: true, // allow cookies / credentials
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], // allowed HTTP methods
     allowedHeaders: ["Content-Type", "Authorization"], // headers your frontend sends
-  })
+  }),
 );
 
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
 
 /* =====================================
    ROOT
@@ -54,6 +55,8 @@ app.use("/api/v1/courts", courtRoutes);
 app.use("/api/v1/reports", reportRoutes);
 app.use("/api/v1/user", userRoutes);
 app.use("/api/v1/gazette", scanRoutes);
+app.use("/api/v1/admin", adminRoutes);
+app.use("/api/v1/gp", goRoutes)
 
 /* =====================================
    HEALTH CHECKS

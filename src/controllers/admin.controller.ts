@@ -80,3 +80,28 @@ export const verifyRecords = async (req: Request, res: Response) => {
     return res.status(500).json({ message: "Bulk verification failed" });
   }
 };
+
+export const getRecordsForAdmin = async (req: Request, res: Response) => {
+  try {
+    const { page = "1", limit = "10", search = "", court, compliance, kpi } = req.query as any;
+    const limitNum = Math.min(Number(limit), 100);
+    const query: any = {};
+
+    if (court && Types.ObjectId.isValid(court)) query.courtStation = court;
+    if (compliance) query.form60Compliance = compliance;
+    if (kpi === "breached") query.forwardingLeadTime = { $gt: 30 };
+    if (search) query.$text = { $search: search };
+
+    const [records, total] = await Promise.all([
+      Record.find(query).sort({ createdAt: -1 }).skip((Number(page) - 1) * limitNum).limit(limitNum).populate("courtStation", "name").lean(),
+      Record.countDocuments(query),
+    ]);
+
+    return res.status(200).json({ success: true, records, pagination: { total, page: Number(page), pages: Math.ceil(total / limitNum) } });
+  } catch {
+    return res.status(500).json({ message: "Admin fetch failure" });
+  }
+};
+
+
+

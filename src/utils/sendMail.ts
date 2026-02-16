@@ -1,4 +1,3 @@
-// src/utils/sendMail.ts
 import * as SibApiV3Sdk from "sib-api-v3-sdk";
 import { env } from "../config/env";
 
@@ -6,12 +5,10 @@ import { env } from "../config/env";
    INIT BREVO TRANSACTIONAL API
 ========================================================= */
 
-// Check key type
 if (!env.BREVO_API_KEY) {
   throw new Error("❌ BREVO_API_KEY is missing in your .env file");
 }
 
-// Warn if SMTP key is used by mistake
 if (env.BREVO_API_KEY.startsWith("xsmtp")) {
   console.warn(
     "⚠️ It looks like you are using an SMTP key for the REST API. " +
@@ -19,10 +16,7 @@ if (env.BREVO_API_KEY.startsWith("xsmtp")) {
   );
 }
 
-// Get the singleton API client instance
 const apiClient = SibApiV3Sdk.ApiClient.instance;
-
-// Assign REST API key
 apiClient.authentications["api-key"].apiKey = env.BREVO_API_KEY;
 
 const transactionalApi = new SibApiV3Sdk.TransactionalEmailsApi(apiClient);
@@ -55,32 +49,34 @@ export const sendMail = async ({
   includeDefaultCC = true,
 }: SendMailOptions) => {
   try {
-    // Validate recipients
+    // 1. Prepare "To" list
     const toList = Array.isArray(to)
       ? to.map((email) => ({ email }))
       : [{ email: to }];
 
-    const defaultCC = includeDefaultCC
-      ? [{ email: "principalregistry@court.go.ke" }]
+    // 2. Prepare Default CC from ENV
+    const defaultCCList = (includeDefaultCC && env.DEFAULT_CC_EMAIL)
+      ? [{ email: env.DEFAULT_CC_EMAIL }]
       : [];
 
-    const ccList = cc
-      ? [
-          ...defaultCC,
-          ...(Array.isArray(cc)
-            ? cc.map((email) => ({ email }))
-            : [{ email: cc }]),
-        ]
-      : defaultCC;
+    // 3. Merge with optional CCs passed to the function
+    let finalCcList = [...defaultCCList];
+    
+    if (cc) {
+      const additionalCc = Array.isArray(cc)
+        ? cc.map((email) => ({ email }))
+        : [{ email: cc }];
+      finalCcList = [...finalCcList, ...additionalCc];
+    }
 
-    // Send email
+    // 4. Send email
     const response = await transactionalApi.sendTransacEmail({
       sender: {
         name: env.MAIL_FROM_NAME,
         email: env.MAIL_FROM_EMAIL,
       },
       to: toList,
-      cc: ccList.length ? ccList : undefined,
+      cc: finalCcList.length > 0 ? finalCcList : undefined,
       subject,
       htmlContent: html,
       textContent: text,
@@ -90,7 +86,6 @@ export const sendMail = async ({
     console.log("📧 [EMAIL SENT]", response.messageId || "ok");
     return response;
   } catch (error: any) {
-    // Show clear error if key is wrong
     if (
       error?.response?.body?.message?.includes("Key not found") ||
       error?.response?.body?.code === "unauthorized"

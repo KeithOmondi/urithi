@@ -25,7 +25,7 @@ const router = Router();
 router.post("/create", protect, createRecord);
 
 router.get("/get", protect, getAllRecords);
-router.get("/admin", protect, getRecordsForAdmin);
+router.get("/admin", protect, restrictTo("admin"),  getRecordsForAdmin);
 router.get("/stats", protect, getRecordStats);
 router.get("/court/:courtId", protect, getRecordsByCourt);
 

@@ -11,131 +11,119 @@ import sendMail from "../utils/sendMail";
 import { getNextSequence } from "../utils/counter";
 import { emailTemplates } from "../utils/emailTemplates";
 
-/* =========================================================
-   INTERNAL HELPERS (REWRITTEN)
-========================================================= */
+const BATCH_SIZE = 10;
 
-const BATCH_SIZE = 10; // max simultaneous emails
-
+/**
+ * Orchestrates email notifications for various record events.
+ */
 const notifyStakeholders = async (
   record: any,
-  options?: { isForwarding?: boolean; checkKpi?: boolean }
+  options: { isForwarding?: boolean; checkKpi?: boolean } = {},
 ) => {
-  const { isForwarding = false, checkKpi = false } = options || {};
+  const { isForwarding = false, checkKpi = false } = options;
 
-  // 1. Fetch Dependencies
-  const [court, admins] = await Promise.all([
-    Court.findById(record.courtStation).lean<ICourt>(),
-    User.find({ role: { $regex: /^admin$/i } }).select("email").lean(),
-  ]);
+  try {
+    // 1. Parallel Fetching of Court and Admins
+    const [court, admins] = await Promise.all([
+      Court.findById(record.courtStation).lean<ICourt>(),
+      User.find({ role: { $regex: /^admin$/i } })
+        .select("email")
+        .lean(),
+    ]);
 
-  const adminEmails = admins.map(a => a.email);
-  const courtEmail = court?.primaryEmail;
-
-  // Deduplicate and clean
-  const recipients = Array.from(
-    new Set([...adminEmails, courtEmail].filter(Boolean).map(e => e?.toLowerCase().trim()))
-  ) as string[];
-
-  if (!recipients.length) {
-    console.warn("No valid email recipients for record:", record._id);
-    return;
-  }
-
-  // 2. Lead Time Calculation
-  const receiptLeadTime = record.receivingLeadTime ??
-    calculateLeadTime(record.dateOfReceipt, record.dateReceived) ?? 0;
-
-  const emailData = {
-    causeNo: record.causeNo,
-    deceasedName: record.nameOfDeceased,
-    courtName: court?.name || "Registry Station",
-    reason: record.rejectionReason || "No reason provided",
-    leadTime: receiptLeadTime,
-    approvalDate: record.dateReceived || record.updatedAt,
-  };
-
-  // 3. Determine which emails to send
-  const jobs: { to: string; subject: string; html: string }[] = [];
-
-  let kpiSent = false;
-
-  if (checkKpi && Number(receiptLeadTime) >= 30 && !record.kpiAlertSent) {
-    const warning = emailTemplates.leadTimeWarning(emailData);
-    recipients.forEach(email => jobs.push({ to: email, subject: warning.subject, html: warning.html }));
-    kpiSent = true;
-  }
-
-  // Standard notification
-  let template;
-  if (isForwarding) {
-    template = emailTemplates.recordForwarded(emailData);
-  } else if (record.form60Compliance === Form60Compliance.REJECTED) {
-    template = emailTemplates.recordRejected(emailData);
-  } else {
-    template = emailTemplates.recordApproved(emailData);
-  }
-
-  recipients.forEach(email => {
-    jobs.push({ to: email, subject: template.subject, html: template.html });
-  });
-
-  // 4. Send emails in batches
-  for (let i = 0; i < jobs.length; i += BATCH_SIZE) {
-    const batch = jobs.slice(i, i + BATCH_SIZE);
-    await Promise.all(
-      batch.map(job =>
-        sendMail(job)
-          .then(() => console.log(`Email sent to ${job.to}`))
-          .catch(err => console.error(`Failed email to ${job.to}:`, err))
-      )
+    const recipients = Array.from(
+      new Set(
+        [...admins.map((a) => a.email), court?.primaryEmail]
+          .filter(Boolean)
+          .map((e) => e!.toLowerCase().trim()),
+      ),
     );
-  }
 
-  // 5. Update KPI flag only after sending KPI emails
-  if (kpiSent) {
-    await Record.findByIdAndUpdate(record._id, { $set: { kpiAlertSent: true } });
-  }
+    if (!recipients.length) return;
 
-  console.log(`>>> Emails processed for record ${record._id}: ${recipients.length} recipients.`);
+    // 2. Data Preparation
+    const receiptLeadTime =
+      record.receivingLeadTime ??
+      calculateLeadTime(record.dateOfReceipt, record.dateReceived) ??
+      0;
+
+    const emailData = {
+      causeNo: record.causeNo,
+      deceasedName: record.nameOfDeceased,
+      courtName: court?.name || "Registry Station",
+      reason: record.rejectionReason || "No reason provided",
+      leadTime: receiptLeadTime,
+      approvalDate: record.dateReceived || record.updatedAt,
+    };
+
+    const jobs: { to: string; subject: string; html: string }[] = [];
+    let kpiTriggered = false;
+
+    // 3. KPI Logic
+    if (checkKpi && Number(receiptLeadTime) >= 30 && !record.kpiAlertSent) {
+      const warning = emailTemplates.leadTimeWarning(emailData);
+      recipients.forEach((to) => jobs.push({ to, ...warning }));
+      kpiTriggered = true;
+    }
+
+    // 4. Template Selection
+    let template;
+    if (isForwarding) {
+      template = emailTemplates.recordForwarded(emailData);
+    } else if (record.form60Compliance === Form60Compliance.REJECTED) {
+      template = emailTemplates.recordRejected(emailData);
+    } else {
+      template = emailTemplates.recordApproved(emailData);
+    }
+    recipients.forEach((to) => jobs.push({ to, ...template }));
+
+    // 5. Batched Execution
+    for (let i = 0; i < jobs.length; i += BATCH_SIZE) {
+      const batch = jobs.slice(i, i + BATCH_SIZE);
+      await Promise.allSettled(batch.map((job) => sendMail(job)));
+    }
+
+    if (kpiTriggered) {
+      await Record.findByIdAndUpdate(record._id, {
+        $set: { kpiAlertSent: true },
+      });
+    }
+  } catch (error) {
+    console.error(`Notification Error for Record ${record._id}:`, error);
+  }
 };
 
-/* =========================================================
-   USAGE EXAMPLES (CREATE / UPDATE / BULK)
-========================================================= */
-
-// CREATE RECORD
 export const createRecord = async (req: Request, res: Response) => {
   const session = await mongoose.startSession();
-  const { causeNo } = req.body;
-
   try {
     session.startTransaction();
     const nextNo = await getNextSequence("record");
 
     const [record] = await Record.create(
-      [{ ...req.body, no: nextNo, causeNo: causeNo.toUpperCase().trim(), kpiAlertSent: false }],
-      { session }
+      [
+        {
+          ...req.body,
+          no: nextNo,
+          causeNo: req.body.causeNo.toUpperCase().trim(),
+          kpiAlertSent: false,
+        },
+      ],
+      { session },
     );
 
     await session.commitTransaction();
-    session.endSession();
 
-    if (record) {
-      await notifyStakeholders(record.toObject(), { checkKpi: true });
-    }
+    // Background notification
+    notifyStakeholders(record.toObject(), { checkKpi: true });
 
     return res.status(201).json(record);
   } catch (err: any) {
-    if (session.inTransaction()) await session.abortTransaction();
-    session.endSession();
+    await session.abortTransaction();
     return res.status(500).json({ message: err.message });
+  } finally {
+    session.endSession();
   }
 };
-
-/* =========================================================
-   UPDATE (REWRITTEN)
-========================================================= */
 
 export const updateRecord = async (
   req: Request<{ id: string }> & { user?: any },
@@ -147,77 +135,26 @@ export const updateRecord = async (
 
     const updates = Object.keys(req.body);
     Object.assign(record, req.body);
-
     record.updatedBy = req.user?.id;
-    record.lastEditAction = `Updated: ${updates.join(", ")}`;
+    record.lastEditAction = `Updated fields: ${updates.join(", ")}`;
 
-    await record.save(); // Triggers lead time re-calculation hooks
+    await record.save();
 
-    // Re-fetch populated and with fresh calculations
     const updatedDoc = await Record.findById(record._id)
       .populate("courtStation", "name level")
       .populate("updatedBy", "firstName lastName pjNumber")
       .lean();
 
-    const isForwarding = "dateForwardedToGP" in req.body;
-
-    if (updatedDoc) {
-      notifyStakeholders(updatedDoc, { isForwarding, checkKpi: false }).catch(
-        console.error,
-      );
-    }
+    notifyStakeholders(updatedDoc, {
+      isForwarding: "dateForwardedToGP" in req.body,
+      checkKpi: false,
+    });
 
     return res.status(200).json(updatedDoc);
   } catch (err: any) {
     return res.status(500).json({ message: err.message });
   }
 };
-
-/* =========================================================
-   FETCH ALL (ADMIN SAFE)
-========================================================= */
-
-export const getAllRecords = async (_req: Request, res: Response) => {
-  try {
-    const records = await Record.find()
-      .select(
-        `
-        no
-        causeNo
-        nameOfDeceased
-        dateReceived
-        dateOfReceipt
-        dateForwardedToGP
-        receivingLeadTime
-        forwardingLeadTime
-        form60Compliance
-        rejectionReason
-        statusAtGP
-        courtStation
-        updatedBy
-        lastEditAction
-        createdAt
-        updatedAt
-      `,
-      )
-      .populate("courtStation", "name level")
-      .populate("updatedBy", "firstName lastName pjNumber")
-      .sort({ createdAt: -1 })
-      .lean();
-
-    return res.status(200).json({
-      success: true,
-      count: records.length,
-      records,
-    });
-  } catch {
-    return res.status(500).json({ message: "Failed to fetch records" });
-  }
-};
-
-/* =========================================================
-   FETCH ONE
-========================================================= */
 
 export const getRecordById = async (
   req: Request<{ id: string }>,
@@ -230,16 +167,24 @@ export const getRecordById = async (
       .lean();
 
     if (!record) return res.status(404).json({ message: "Record not found" });
-
     return res.status(200).json(record);
   } catch {
     return res.status(500).json({ message: "Failed to fetch record" });
   }
 };
 
-/* =========================================================
-   BULK UPDATE (SAFE)
-========================================================= */
+export const deleteRecord = async (
+  req: Request<{ id: string }>,
+  res: Response,
+) => {
+  try {
+    const deleted = await Record.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ message: "Not found" });
+    return res.status(200).json({ success: true });
+  } catch {
+    return res.status(500).json({ message: "Delete failed" });
+  }
+};
 
 export const updateMultipleRecordsDateForwarded = async (
   req: any,
@@ -247,9 +192,7 @@ export const updateMultipleRecordsDateForwarded = async (
 ) => {
   try {
     const { ids, date } = req.body;
-
     const validIds = ids.filter((id: string) => Types.ObjectId.isValid(id));
-
     const newForwardedDate = new Date(date);
 
     const records = await Record.find({ _id: { $in: validIds } });
@@ -274,120 +217,25 @@ export const updateMultipleRecordsDateForwarded = async (
 
     await Record.bulkWrite(operations);
 
-    const updatedRecords = await Record.find({
-      _id: { $in: validIds },
-    })
+    const updatedRecords = await Record.find({ _id: { $in: validIds } })
       .populate("courtStation", "name level")
       .populate("updatedBy", "firstName lastName pjNumber");
 
     updatedRecords.forEach((r) =>
-      notifyStakeholders(r.toObject(), {
-        isForwarding: true,
-        checkKpi: false,
-      }).catch(console.error),
+      notifyStakeholders(r.toObject(), { isForwarding: true }),
     );
 
-    return res.status(200).json({
-      success: true,
-      modifiedCount: operations.length,
-      records: updatedRecords,
-    });
+    return res
+      .status(200)
+      .json({
+        success: true,
+        modifiedCount: operations.length,
+        records: updatedRecords,
+      });
   } catch (err: any) {
     return res.status(500).json({ message: err.message });
   }
 };
-
-/*==============================================
-GET RECORDS BY COURT
-================================================*/
-export const getRecordsByCourt = async (
-  req: Request<{ courtId: string }>,
-  res: Response,
-) => {
-  try {
-    const records = await Record.find({ courtStation: req.params.courtId })
-      .populate("courtStation", "name")
-      .sort({ createdAt: -1 })
-      .lean();
-    return res.status(200).json({ success: true, records });
-  } catch {
-    return res.status(500).json({ message: "Failed to fetch court records" });
-  }
-};
-
-/* =========================================================
-    ULTRA-FAST STATISTICS (1 Query instead of 7)
-========================================================= */
-
-export const getRecordStats = async (_req: Request, res: Response) => {
-  try {
-    const stats = await Record.aggregate([
-      {
-        $facet: {
-          metrics: [
-            {
-              $group: {
-                _id: null,
-                total: { $sum: 1 },
-                approved: {
-                  $sum: {
-                    $cond: [{ $eq: ["$form60Compliance", "Approved"] }, 1, 0],
-                  },
-                },
-                rejected: {
-                  $sum: {
-                    $cond: [{ $eq: ["$form60Compliance", "Rejected"] }, 1, 0],
-                  },
-                },
-                pending: {
-                  $sum: { $cond: [{ $eq: ["$statusAtGP", "Pending"] }, 1, 0] },
-                },
-                published: {
-                  $sum: {
-                    $cond: [{ $eq: ["$statusAtGP", "Published"] }, 1, 0],
-                  },
-                },
-                kpiBreaches: {
-                  $sum: { $cond: [{ $gt: ["$forwardingLeadTime", 30] }, 1, 0] },
-                },
-                avgRec: { $avg: "$receivingLeadTime" },
-                avgFor: { $avg: "$forwardingLeadTime" },
-              },
-            },
-          ],
-        },
-      },
-    ]);
-
-    const data = stats[0].metrics[0] || { total: 0 };
-
-    return res.status(200).json({
-      success: true,
-      stats: {
-        total: data.total || 0,
-        compliance: {
-          approved: data.approved || 0,
-          rejected: data.rejected || 0,
-        },
-        gpStatus: {
-          pending: data.pending || 0,
-          published: data.published || 0,
-        },
-        kpiBreaches: data.kpiBreaches || 0,
-        averages: {
-          receivingLeadTime: Math.round(data.avgRec || 0),
-          forwardingLeadTime: Math.round(data.avgFor || 0),
-        },
-      },
-    });
-  } catch (err) {
-    return res.status(500).json({ message: "Stats generation failed" });
-  }
-};
-
-/* =========================================================
-    OPTIMIZED FETCHING
-========================================================= */
 
 export const getRecordsForAdmin = async (req: Request, res: Response) => {
   try {
@@ -399,7 +247,6 @@ export const getRecordsForAdmin = async (req: Request, res: Response) => {
       compliance,
       kpi,
     } = req.query as Record<string, string>;
-
     const limitNum = Math.min(Number(limit), 100);
     const skip = (Number(page) - 1) * limitNum;
 
@@ -411,20 +258,6 @@ export const getRecordsForAdmin = async (req: Request, res: Response) => {
 
     const [records, total] = await Promise.all([
       Record.find(query)
-        .select(
-          `
-          no
-          causeNo
-          nameOfDeceased
-          dateReceived
-          dateForwardedToGP
-          forwardingLeadTime
-          form60Compliance
-          statusAtGP
-          courtStation
-          createdAt
-          `,
-        )
         .populate("courtStation", "name level")
         .sort({ createdAt: -1 })
         .skip(skip)
@@ -447,88 +280,159 @@ export const getRecordsForAdmin = async (req: Request, res: Response) => {
   }
 };
 
-export const getAdvancedReports = async (_req: Request, res: Response) => {
+export const getRecordStats = async (_req: Request, res: Response) => {
   try {
-    const stats = await Record.aggregate([
+    const [stats] = await Record.aggregate([
       {
-        $facet: {
-          // 1. General Totals
-          generalStats: [
-            {
-              $group: {
-                _id: null,
-                totalRecords: { $sum: 1 },
-                avgForwardingTime: { $avg: "$forwardingLeadTime" },
-                avgReceivingTime: { $avg: "$receivingLeadTime" },
-                compliantCount: {
-                  $sum: {
-                    $cond: [{ $eq: ["$form60Compliance", "Approved"] }, 1, 0],
-                  },
-                },
-              },
-            },
-          ],
-          // 2. Performance by Court (High/Low Lead Times)
-          courtPerformance: [
-            {
-              $group: {
-                _id: "$courtStation",
-                avgLeadTime: { $avg: "$forwardingLeadTime" },
-                recordCount: { $sum: 1 },
-              },
-            },
-            { $sort: { avgLeadTime: 1 } }, // Best performing first
-            {
-              $lookup: {
-                from: "courts", // assumes collection name is courts
-                localField: "_id",
-                foreignField: "_id",
-                as: "courtDetails",
-              },
-            },
-            { $unwind: "$courtDetails" },
-          ],
+        $group: {
+          _id: null,
+          total: { $sum: 1 },
+          approved: {
+            $sum: { $cond: [{ $eq: ["$form60Compliance", "Approved"] }, 1, 0] },
+          },
+          rejected: {
+            $sum: { $cond: [{ $eq: ["$form60Compliance", "Rejected"] }, 1, 0] },
+          },
+          pending: {
+            $sum: { $cond: [{ $eq: ["$statusAtGP", "Pending"] }, 1, 0] },
+          },
+          published: {
+            $sum: { $cond: [{ $eq: ["$statusAtGP", "Published"] }, 1, 0] },
+          },
+          kpiBreaches: {
+            $sum: { $cond: [{ $gt: ["$forwardingLeadTime", 30] }, 1, 0] },
+          },
+          avgRec: { $avg: "$receivingLeadTime" },
+          avgFor: { $avg: "$forwardingLeadTime" },
         },
       },
     ]);
 
-    return res.status(200).json({ success: true, data: stats[0] });
-  } catch (err) {
-    return res.status(500).json({ message: "Report generation failed" });
-  }
-};
-
-export const verifyRecords = async (req: Request, res: Response) => {
-  try {
-    const validIds = req.body.ids.filter(Types.ObjectId.isValid);
-    const result = await Record.updateMany(
-      { _id: { $in: validIds } },
-      { $set: { statusAtGP: StatusAtGP.PUBLISHED, datePublished: new Date() } },
-    );
-    return res
-      .status(200)
-      .json({ success: true, modifiedCount: result.modifiedCount });
+    const data = stats || { total: 0 };
+    return res.status(200).json({
+      success: true,
+      stats: {
+        total: data.total,
+        compliance: {
+          approved: data.approved || 0,
+          rejected: data.rejected || 0,
+        },
+        gpStatus: {
+          pending: data.pending || 0,
+          published: data.published || 0,
+        },
+        kpiBreaches: data.kpiBreaches || 0,
+        averages: {
+          receivingLeadTime: Math.round(data.avgRec || 0),
+          forwardingLeadTime: Math.round(data.avgFor || 0),
+        },
+      },
+    });
   } catch {
-    return res.status(500).json({ message: "Verification failed" });
-  }
-};
-
-export const deleteRecord = async (
-  req: Request<{ id: string }>,
-  res: Response,
-) => {
-  try {
-    const deleted = await Record.findByIdAndDelete(req.params.id);
-    if (!deleted) return res.status(404).json({ message: "Not found" });
-    return res.status(200).json({ success: true });
-  } catch {
-    return res.status(500).json({ message: "Delete failed" });
+    return res.status(500).json({ message: "Stats generation failed" });
   }
 };
 
 /* =========================================================
-    ANALYTICS (Corrected Types)
+   VERIFICATION & BATCH UPDATES
 ========================================================= */
+
+/**
+ * Marks multiple records as Published once verified.
+ */
+export const verifyRecords = async (req: Request, res: Response) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids)) {
+      return res
+        .status(400)
+        .json({ message: "Invalid input: ids must be an array" });
+    }
+
+    const validIds = ids.filter((id: string) => Types.ObjectId.isValid(id));
+
+    const result = await Record.updateMany(
+      { _id: { $in: validIds } },
+      {
+        $set: {
+          statusAtGP: StatusAtGP.PUBLISHED,
+          datePublished: new Date(),
+        },
+      },
+    );
+
+    return res.status(200).json({
+      success: true,
+      modifiedCount: result.modifiedCount,
+    });
+  } catch (err: any) {
+    return res
+      .status(500)
+      .json({ message: "Verification failed", error: err.message });
+  }
+};
+
+/* =========================================================
+   FETCHING & LISTS
+========================================================= */
+
+/**
+ * Retrieves all records with essential administrative fields.
+ */
+export const getAllRecords = async (_req: Request, res: Response) => {
+  try {
+    const records = await Record.find()
+      .select(
+        `
+        no causeNo nameOfDeceased dateReceived dateOfReceipt 
+        dateForwardedToGP receivingLeadTime forwardingLeadTime 
+        form60Compliance rejectionReason statusAtGP courtStation 
+        updatedBy lastEditAction createdAt updatedAt
+      `,
+      )
+      .populate("courtStation", "name level")
+      .populate("updatedBy", "firstName lastName pjNumber")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      count: records.length,
+      records,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ message: "Failed to fetch records" });
+  }
+};
+
+/**
+ * Filters records by a specific court station.
+ */
+export const getRecordsByCourt = async (
+  req: Request<{ courtId: string }>,
+  res: Response,
+) => {
+  try {
+    const { courtId } = req.params;
+
+    if (!Types.ObjectId.isValid(courtId)) {
+      return res.status(400).json({ message: "Invalid Court ID format" });
+    }
+
+    const records = await Record.find({ courtStation: courtId })
+      .populate("courtStation", "name")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      count: records.length,
+      records,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ message: "Failed to fetch court records" });
+  }
+};
 
 export const getAnalytics = async (req: Request, res: Response) => {
   try {
@@ -538,7 +442,7 @@ export const getAnalytics = async (req: Request, res: Response) => {
         ? { courtStation: new Types.ObjectId(courtId as string) }
         : {};
 
-    const stats = await Record.aggregate([
+    const [results] = await Record.aggregate([
       {
         $facet: {
           summary: [
@@ -565,7 +469,6 @@ export const getAnalytics = async (req: Request, res: Response) => {
             },
           ],
           courtPerformance: [
-            // 1. Group by the Court ID
             {
               $group: {
                 _id: "$courtStation",
@@ -577,24 +480,20 @@ export const getAnalytics = async (req: Request, res: Response) => {
                 },
               },
             },
-            // 2. Join with the Courts collection to get the name
             {
               $lookup: {
-                from: "courts", // MUST match the actual name of your courts collection in MongoDB
+                from: "courts",
                 localField: "_id",
                 foreignField: "_id",
                 as: "courtDetails",
               },
             },
-            // 3. Convert the courtDetails array into a single object
             { $unwind: "$courtDetails" },
-            // 4. Project the final fields (Replace the ID with the actual name)
             {
               $project: {
-                _id: 1,
                 count: 1,
                 complianceRate: { $round: ["$complianceRate", 1] },
-                courtName: "$courtDetails.name", // This is where the actual name comes from
+                courtName: "$courtDetails.name",
               },
             },
             { $sort: { count: -1 } },
@@ -603,16 +502,10 @@ export const getAnalytics = async (req: Request, res: Response) => {
       },
     ]);
 
-    return res.status(200).json({
-      success: true,
-      data: stats[0],
-    });
-  } catch (error: unknown) {
-    const errorMessage =
-      error instanceof Error ? error.message : "Internal Server Error";
-    return res.status(500).json({
-      message: "Analytics aggregation failed",
-      error: errorMessage,
-    });
+    return res.status(200).json({ success: true, data: results });
+  } catch (error: any) {
+    return res
+      .status(500)
+      .json({ message: "Analytics failed", error: error.message });
   }
 };

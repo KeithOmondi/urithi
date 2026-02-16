@@ -6,6 +6,7 @@ import mongoose, { Schema, Document } from "mongoose";
 export enum UserRole {
   ADMIN = "admin",
   USER = "user",
+  GP = "gp", // ✅ New role added
 }
 
 /* =====================================
@@ -55,7 +56,7 @@ const userSchema = new Schema<IUser>(
       unique: true,
       index: true,
       trim: true,
-      lowercase: true, // normalize for consistent lookups
+      lowercase: true,
     },
 
     role: {
@@ -82,7 +83,7 @@ const userSchema = new Schema<IUser>(
   },
   {
     timestamps: true,
-  },
+  }
 );
 
 /* =====================================

@@ -1,8 +1,17 @@
-import mongoose from "mongoose";
-import  { CourtLevel, ICourt } from "./models/court.model";
-import { env } from "./config/env";
+import { CourtLevel } from "./models/court.model"; // if you use enums
 
-const courts: Partial<ICourt>[] = [
+export interface IOldCourt {
+  name: string;
+  level: CourtLevel;
+  code?: string;
+  magistrate?: string;
+  primaryEmail?: string;
+  secondaryEmails?: string[];
+  phone?: string;
+  location?: string; // ← add this
+}
+
+export const oldCourts: IOldCourt[] = [
   {
     name: "BARICHO LAW COURTS",
     level: CourtLevel.LAW_COURTS,
@@ -1774,6 +1783,7 @@ const courts: Partial<ICourt>[] = [
   code: "80235",
   location: "",
 },
+
 {
   name: "UKWALA LAW COURTS",
   level: CourtLevel.LAW_COURTS,
@@ -2106,39 +2116,6 @@ const courts: Partial<ICourt>[] = [
   code: "",
   location: "",
 },
+
+
 ];
-
-const seedCourts = async (): Promise<void> => {
-  try {
-    // 🔥 Connect to MongoDB with explicit DB name
-    await mongoose.connect(env.MONGO_URI, { dbName: env.DB_NAME });
-    console.log(`🌍 Connected to MongoDB: ${mongoose.connection.name}`);
-
-    // Lazy-import the Court model AFTER connection
-    const { Court } = await import("./models/court.model");
-
-    // Prepare bulk operations with upsert
-    const operations = courts.map((court) => ({
-      updateOne: {
-        filter: { name: court.name }, // unique field
-        update: { $set: court },
-        upsert: true,
-      },
-    }));
-
-    const result = await Court.bulkWrite(operations);
-
-    console.log("🌟 Courts seeded successfully");
-    console.log(`👉 Inserted: ${result.upsertedCount}, Updated: ${result.modifiedCount}`);
-
-    // Disconnect cleanly
-    await mongoose.disconnect();
-    console.log("🟡 MongoDB disconnected");
-    process.exit(0);
-  } catch (error: any) {
-    console.error("❌ Seeding error:", error.message);
-    process.exit(1);
-  }
-};
-
-seedCourts();

@@ -27,7 +27,8 @@
     "pdf-lib": "^1.17.1",
     "pdf-text-extract": "^1.5.0",
     "react-select": "^5.10.2",
-    "sib-api-v3-sdk": "^8.5.0"
+    "sib-api-v3-sdk": "^8.5.0",
+    "string-similarity": "^4.0.4"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
@@ -39,6 +40,7 @@
     "@types/node": "^25.0.10",
     "@types/nodemailer": "^7.0.9",
     "@types/pdf-parse": "^1.1.5",
+    "@types/string-similarity": "^4.0.2",
     "nodemon": "^3.1.11",
     "prisma": "^6.19.2",
     "ts-node": "^10.9.2",
