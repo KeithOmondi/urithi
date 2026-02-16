@@ -88,51 +88,52 @@ export const emailTemplates = {
   }),
 
   /* ======================================================
-     RECORD FORWARDED TO GP
-  ====================================================== */
-  recordForwarded: (data: TemplateData): BaseEmail => ({
-    subject: `NOTIFICATION OF GAZETTEMENT: Cause No. ${data.causeNo}`,
-    html: `
-      <div style="${containerStyle}">
-        <div style="${headerStyle}">
-          <img src="${LOGO_URL}" alt="Judiciary Logo" style="height:60px;margin-bottom:10px;" />
-          <h2 style="margin:0;font-size:18px;text-transform:uppercase;letter-spacing:2px;">
-            Principal Registry
-          </h2>
-          <p style="margin:5px 0 0;font-size:11px;opacity:.9;">
-            Republic of Kenya | The Judiciary
-          </p>
-        </div>
-
-        <div style="padding:30px;color:${NEUTRAL_SLATE};">
-
-          <h3 style="color:${JUDICIAL_GREEN};margin-top:0;">
-            Transmission to Government Printer
-          </h3>
-
-          <p>
-            We are pleased to inform you that the following document has been
-            forwarded to the <strong>Government Printer</strong> for official
-            gazettement:
-          </p>
-
-          <div style="background:#f0fdf4;border:1px solid #bbf7d0;padding:20px;margin:20px 0;border-radius:6px;">
-            <strong>Cause Number:</strong> ${data.causeNo}<br/>
-            <strong>Name of Deceased:</strong>
-            <span style="text-transform:uppercase;">${data.deceasedName}</span><br/>
-            <strong>Date Forwarded:</strong> ${formatDate(data.approvalDate)}
-          </div>
-
-          <p>
-            The status of this record has been updated to
-            <strong>"Pending Publication"</strong>.
-          </p>
-
-          ${footerHtml}
-        </div>
+    RECORD FORWARDED TO GP (Updated)
+====================================================== */
+recordForwarded: (data: TemplateData): BaseEmail => ({
+  // Subject now picks the court station before the cause number
+  subject: `${data.courtName} | Cause No. ${data.causeNo}: NOTIFICATION OF GAZETTEMENT`,
+  html: `
+    <div style="${containerStyle}">
+      <div style="${headerStyle}">
+        <img src="${LOGO_URL}" alt="Judiciary Logo" style="height:60px;margin-bottom:10px;" />
+        <h2 style="margin:0;font-size:18px;text-transform:uppercase;letter-spacing:2px;">
+          TRANSMISSION TO GOVERNMENT PRINTER
+        </h2>
+        <p style="margin:5px 0 0;font-size:11px;opacity:.9;">
+          Republic of Kenya | The Judiciary
+        </p>
       </div>
-    `,
-  }),
+
+      <div style="padding:30px;color:${NEUTRAL_SLATE};">
+
+        <h3 style="color:${JUDICIAL_GREEN};margin-top:0;">
+          Official Forwarding Notification
+        </h3>
+
+        <p>
+          We are pleased to inform you that the following document from <strong>${data.courtName}</strong> 
+          has been forwarded to the <strong>Government Printer</strong> for official gazettement:
+        </p>
+
+        <div style="background:#f0fdf4;border:1px solid #bbf7d0;padding:20px;margin:20px 0;border-radius:6px;">
+          <strong>Court Station:</strong> ${data.courtName}<br/>
+          <strong>Cause Number:</strong> ${data.causeNo}<br/>
+          <strong>Name of Deceased:</strong>
+          <span style="text-transform:uppercase;">${data.deceasedName}</span><br/>
+          <strong>Date Forwarded:</strong> ${formatDate(data.approvalDate)}
+        </div>
+
+        <p>
+          The status of this record has been updated to 
+          <strong>"Pending Publication"</strong>.
+        </p>
+
+        ${footerHtml}
+      </div>
+    </div>
+  `,
+}),
 
   /* ======================================================
    RECORD REJECTED
