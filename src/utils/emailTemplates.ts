@@ -48,7 +48,7 @@ export const emailTemplates = {
      RECORD APPROVED / RECEIVED
   ====================================================== */
   recordApproved: (data: TemplateData): BaseEmail => ({
-    subject: `ACKNOWLEDGMENT OF RECEIPT: Cause No. ${data.causeNo}`,
+    subject: `INORDINATE DELAY: Cause No. ${data.causeNo}`,
     html: `
       <div style="${containerStyle}">
         <div style="${headerStyle}">
