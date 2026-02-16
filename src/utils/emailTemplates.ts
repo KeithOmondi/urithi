@@ -135,7 +135,7 @@ export const emailTemplates = {
 ====================================================== */
 recordForwarded: (data: TemplateData): BaseEmail => ({
   // Subject now picks the court station before the cause number
-  subject: `${data.courtName} | Cause No. ${data.causeNo}: NOTIFICATION OF GAZETTEMENT`,
+  subject: `${data.courtName} | Cause No. ${data.causeNo}: TRANSMISSION TO GOVERNMENT PRINTER`,
   html: `
     <div style="${containerStyle}">
       <div style="${headerStyle}">
