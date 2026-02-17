@@ -9,6 +9,7 @@ declare global {
 
     interface Request {
       user?: UserPayload;
+      file?: Express.Multer.File;
     }
   }
 }

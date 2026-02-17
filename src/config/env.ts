@@ -63,6 +63,11 @@ export const env = {
   MAIL_FROM_EMAIL: process.env.MAIL_FROM_EMAIL as string,
   DEFAULT_CC_EMAIL: process.env.DEFAULT_CC_EMAIL as string,
 
+  //CLOUDINARY
+  CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME as string,
+  CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY as string,
+  CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET as string,
+
   // ✅ APP INFO
   APP_VERSION: process.env.APP_VERSION || "dev",
   COMMIT_HASH: process.env.COMMIT_HASH || "local",

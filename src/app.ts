@@ -20,15 +20,21 @@ const app = express();
 /* =====================================
    MIDDLEWARE
 ===================================== */
-
 app.use(
   cors({
-    origin: env.FRONTEND_URL, // frontend domain
-    credentials: true, // allow cookies / credentials
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], // allowed HTTP methods
-    allowedHeaders: ["Content-Type", "Authorization"], // headers your frontend sends
+    origin: env.FRONTEND_URL,      // your frontend domain
+    credentials: true,             // allow cookies
+    methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"], // allowed HTTP methods
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Requested-With",
+      "Accept",
+    ],
   }),
 );
+
+
 
 app.use(cookieParser());
 app.use(express.json());
