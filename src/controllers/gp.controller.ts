@@ -51,70 +51,68 @@ export const getGpDashboard = async (req: CustomRequest, res: Response) => {
    CREATE REJECTION RECORD (PRODUCTION READY)
 ===================================== */
 export const createRejectionRecord = async (req: CustomRequest, res: Response) => {
-  console.log("=== /gp/reject hit ===");
-
-  // Log user info
-  console.log("User Info:", req.user);
-
-  // Log body fields
-  console.log("Body:", req.body);
-
-  // Log file info
-  if (req.file) {
-    console.log("File received:");
-    console.log("  originalname:", req.file.originalname);
-    console.log("  mimetype:", req.file.mimetype);
-    console.log("  size:", req.file.size, "bytes");
-  } else {
-    console.log("No file received");
-  }
-
-  // Validate user
-  if (!req.user) return res.status(401).json({ message: "No user in request" });
-
-  // Validate file
-  if (!req.file) return res.status(400).json({ message: "File is missing" });
-
-  // Validate required body fields
-  const { causeNo, deceasedName, rejectionReason, dateOfRejection, courtStation } = req.body;
-  if (!causeNo || !deceasedName || !rejectionReason || !courtStation) {
-    return res.status(400).json({ message: "Required fields missing" });
-  }
-
   try {
-    // Upload file to Cloudinary
-    const cloudResult: any = await uploadToCloudinary(req.file);
-    const fileUrl = cloudResult?.secure_url;
+    console.log("=== /gp/reject hit ===");
 
-    if (!fileUrl) {
-      console.error("❌ Cloudinary returned no file URL");
-      return res.status(400).json({ message: "Uploaded file URL is missing" });
+    if (!req.user) {
+      return res.status(401).json({ message: "Unauthorized" });
     }
 
-    // Create the rejection record
+    if (!req.file) {
+      return res.status(400).json({ message: "File is missing" });
+    }
+
+    const {
+      causeNo,
+      deceasedName,
+      rejectionReason,
+      dateOfRejection,
+      courtStation,
+    } = req.body;
+
+    if (!causeNo || !deceasedName || !rejectionReason || !courtStation) {
+      return res.status(400).json({ message: "Required fields missing" });
+    }
+
+    // Upload to Cloudinary
+    const cloudResult: any = await uploadToCloudinary(req.file);
+
+    if (!cloudResult?.secure_url) {
+      throw new Error("Cloudinary upload failed");
+    }
+
     const created = await Rejection.create({
       causeNo: causeNo.toUpperCase().trim(),
       deceasedName: deceasedName.trim(),
       rejectionReason,
       dateReceived: dateOfRejection || new Date(),
-      fileUrl,
+      fileUrl: cloudResult.secure_url,
       courtStation,
       updatedBy: req.user.id,
     });
 
-    console.log("✅ Rejection record created:", created);
-    return res.status(201).json({ status: "success", data: created });
+    console.log("✅ Rejection record created");
+
+    // Convert to plain object (important)
+    const safeRecord = created.toObject();
+
+    return res.status(201).json({
+      status: "success",
+      data: safeRecord,
+    });
+
   } catch (err: any) {
-    console.error("❌ Error creating rejection record:", err);
+    console.error("🔥 CREATE REJECTION CRASH:", err);
 
-    const message =
-      err.code === 11000
-        ? "A record with this Cause Number already exists."
-        : "An unexpected error occurred while submitting the record.";
-
-    return res.status(400).json({ message });
+    return res.status(500).json({
+      message:
+        err.code === 11000
+          ? "A record with this Cause Number already exists."
+          : "Server failed while creating rejection record.",
+    });
   }
 };
+
 
 
 
