@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { User } from "../models/User";
 import Rejection from "../models/go.model";
+import { uploadToCloudinary } from "../config/cloudinary";
 
 interface CustomRequest extends Request {
   user?: any;
@@ -44,83 +45,52 @@ export const getGpDashboard = async (req: CustomRequest, res: Response) => {
   }
 };
 
+
+
 /* =====================================
-   CREATE REJECTION RECORD (DEV DEBUG VERSION)
-   - Added logging and user-friendly error messages
+   CREATE REJECTION RECORD (PRODUCTION READY)
 ===================================== */
-/* =====================================
-   CREATE REJECTION RECORD (DEBUG VERSION)
-   - Logs key info for debugging in production
-===================================== */
-export const createRejectionRecord = async (
-  req: Request,
-  res: Response
-) => {
+export const createRejectionRecord = async (req: CustomRequest, res: Response) => {
+  console.log("=== /gp/reject hit ===");
+  console.log("User Info:", req.user);
+  console.log("Body:", req.body);
+
+  if (!req.user) return res.status(401).json({ message: "No user in request" });
+  if (!req.file) return res.status(400).json({ message: "File is missing" });
+
   try {
-    const {
-      causeNo,
-      deceasedName,
-      rejectionReason,
-      dateOfRejection,
-      courtStation,
-    } = req.body;
+    // Upload buffer to Cloudinary
+    const cloudResult: any = await uploadToCloudinary(req.file);
+    const fileUrl = cloudResult?.secure_url;
 
-    // 🔹 Debug Logging
-    console.log("=== /reject called ===");
-    console.log("User Info:", req.user);
-    console.log("File Info:", req.file);
-    console.log("Body Payload:", req.body);
-
-    // 🔹 Validate required fields
-    const missingFields: string[] = [];
-    if (!causeNo) missingFields.push("Cause No");
-    if (!deceasedName) missingFields.push("Deceased Name");
-    if (!rejectionReason) missingFields.push("Reason for Rejection");
-    if (!courtStation) missingFields.push("Court Station");
-    if (!req.file) missingFields.push("Supporting Document");
-
-    if (missingFields.length > 0) {
-      console.warn("Missing fields:", missingFields.join(", "));
-      return res.status(400).json({
-        message: `Submission failed. Missing required field(s): ${missingFields.join(
-          ", "
-        )}. Please provide all required details.`,
-      });
+    if (!fileUrl) {
+      console.error("❌ Cloudinary returned no file URL");
+      return res.status(400).json({ message: "Uploaded file URL is missing" });
     }
 
-    // 🔹 Create the record
-    const createdRejection = await Rejection.create({
-      causeNo: causeNo.toUpperCase().trim(),
-      deceasedName: deceasedName.trim(),
-      rejectionReason,
-      dateReceived: dateOfRejection || new Date(),
-      fileUrl: req.file!.path, // ✅ Non-null assertion
-      courtStation,
-      updatedBy: req.user!.id, // non-null assertion since we've validated
-      lastEditAction: "Initial Archive Creation",
+    // Create the rejection record
+    const created = await Rejection.create({
+      causeNo: req.body.causeNo.toUpperCase().trim(),
+      deceasedName: req.body.deceasedName.trim(),
+      rejectionReason: req.body.rejectionReason,
+      dateReceived: req.body.dateOfRejection || new Date(),
+      fileUrl,
+      courtStation: req.body.courtStation,
+      updatedBy: req.user.id,
     });
 
-    // 🔹 Populate references for immediate frontend use
-    const populated = await Rejection.findById(createdRejection._id)
-      .populate("updatedBy", "firstName lastName pjNumber")
-      .populate("courtStation", "name level")
-      .lean();
-
-    console.log("✅ Rejection record successfully created:", populated);
-
-    return res.status(201).json(populated);
+    console.log("✅ Rejection record created:", created);
+    return res.status(201).json({ status: "success", data: created });
   } catch (err: any) {
-    console.error("❌ Error creating rejection record:", err);
-
-    // Handle duplicate Cause No error
+    console.error("❌ Mongoose create error:", err);
     const message =
       err.code === 11000
-        ? "A record with this Cause Number already exists. Please check and try again."
-        : "An unexpected error occurred while submitting the record. Please try again.";
-
+        ? "A record with this Cause Number already exists."
+        : "An unexpected error occurred while submitting the record.";
     return res.status(400).json({ message });
   }
 };
+
 
 /* =====================================
    FETCH ALL RECORDS (ADMIN ONLY)

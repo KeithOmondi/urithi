@@ -20,7 +20,6 @@ export const upload = multer({
 });
 
 
-// Helper function to upload buffer to Cloudinary
 export const uploadToCloudinary = async (file: Express.Multer.File) => {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
@@ -30,13 +29,16 @@ export const uploadToCloudinary = async (file: Express.Multer.File) => {
         public_id: `reject_${Date.now()}`,
       },
       (error, result) => {
-        if (error) return reject(error);
+        if (error) {
+          console.error("❌ Cloudinary upload error:", error);
+          return reject(error);
+        }
         resolve(result);
       }
     );
-
     stream.end(file.buffer);
   });
 };
+
 
 export default cloudinary;
