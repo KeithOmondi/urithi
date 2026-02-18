@@ -1,7 +1,9 @@
 interface BaseEmail {
   subject: string;
   html: string;
+  text?: string; // ✅ optional
 }
+
 
 interface TemplateData {
   causeNo: string;

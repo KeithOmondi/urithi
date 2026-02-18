@@ -1,5 +1,6 @@
 import * as SibApiV3Sdk from "sib-api-v3-sdk";
 import { env } from "../config/env";
+import Court, { ICourt } from "../models/court.model";
 
 /* =========================================================
    INIT BREVO TRANSACTIONAL API
@@ -12,7 +13,7 @@ if (!env.BREVO_API_KEY) {
 if (env.BREVO_API_KEY.startsWith("xsmtp")) {
   console.warn(
     "⚠️ It looks like you are using an SMTP key for the REST API. " +
-    "Please use a REST API key (starts with 'xkeysib-') for sendTransacEmail."
+      "Please use a REST API key (starts with 'xkeysib-') for sendTransacEmail."
   );
 }
 
@@ -36,7 +37,7 @@ export interface SendMailOptions {
 }
 
 /* =========================================================
-   SEND EMAIL FUNCTION
+   CORE SEND FUNCTION
 ========================================================= */
 
 export const sendMail = async ({
@@ -49,34 +50,26 @@ export const sendMail = async ({
   includeDefaultCC = true,
 }: SendMailOptions) => {
   try {
-    // 1. Prepare "To" list
-    const toList = Array.isArray(to)
-      ? to.map((email) => ({ email }))
-      : [{ email: to }];
+    const toList = Array.isArray(to) ? to.map((email) => ({ email })) : [{ email: to }];
 
-    // 2. Prepare Default CC from ENV
-    const defaultCCList = (includeDefaultCC && env.DEFAULT_CC_EMAIL)
-      ? [{ email: env.DEFAULT_CC_EMAIL }]
+    const defaultCCList =
+      includeDefaultCC && env.MAIL_FROM_EMAIL ? [{ email: env.MAIL_FROM_EMAIL }] : [];
+
+    const ccListFromArgs = cc
+      ? Array.isArray(cc)
+        ? cc.map((email) => ({ email }))
+        : [{ email: cc }]
       : [];
 
-    // 3. Merge with optional CCs passed to the function
-    let finalCcList = [...defaultCCList];
-    
-    if (cc) {
-      const additionalCc = Array.isArray(cc)
-        ? cc.map((email) => ({ email }))
-        : [{ email: cc }];
-      finalCcList = [...finalCcList, ...additionalCc];
-    }
+    const finalCcList = [...defaultCCList, ...ccListFromArgs];
 
-    // 4. Send email
     const response = await transactionalApi.sendTransacEmail({
       sender: {
         name: env.MAIL_FROM_NAME,
         email: env.MAIL_FROM_EMAIL,
       },
       to: toList,
-      cc: finalCcList.length > 0 ? finalCcList : undefined,
+      cc: finalCcList.length ? finalCcList : undefined,
       subject,
       htmlContent: html,
       textContent: text,
@@ -91,14 +84,44 @@ export const sendMail = async ({
       error?.response?.body?.code === "unauthorized"
     ) {
       console.error(
-        "❌ BREVO API ERROR: Key invalid or wrong type. " +
-          "Use a REST API key (starts with xkeysib-) for sendTransacEmail."
+        "❌ BREVO API ERROR: Key invalid or wrong type. Use a REST API key (starts with xkeysib-) for sendTransacEmail."
       );
     } else {
       console.error("❌ [BREVO API ERROR]", error?.response?.body || error);
     }
     throw new Error("Email failed");
   }
+};
+
+/* =========================================================
+   HELPER TO SEND EMAILS TO COURTS
+========================================================= */
+
+export const sendEmailToCourt = async (
+  courtId: string,
+  subject: string,
+  html: string,
+  text?: string
+) => {
+  const court: ICourt | null = await Court.findById(courtId);
+  if (!court) throw new Error("Court not found");
+
+  // TO: Primary email of the court
+  const to = court.primaryEmail;
+
+  // CC: Secondary emails + our system email
+  const cc: string[] = [];
+  if (court.secondaryEmails?.length) cc.push(...court.secondaryEmails);
+
+  // MAIL_FROM_EMAIL is automatically included in sendMail by default, so no need to add manually
+
+  return sendMail({
+    to,
+    cc: cc.length ? cc : undefined,
+    subject,
+    html,
+    text,
+  });
 };
 
 export default sendMail;

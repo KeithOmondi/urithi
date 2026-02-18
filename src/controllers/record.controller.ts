@@ -7,41 +7,45 @@ import Record, {
 } from "../models/record.model";
 import Court, { ICourt } from "../models/court.model";
 import { User } from "../models/User";
-import sendMail from "../utils/sendMail";
+import { sendEmailToCourt } from "../utils/sendMail";
 import { getNextSequence } from "../utils/counter";
 import { emailTemplates } from "../utils/emailTemplates";
 
 const BATCH_SIZE = 10;
 
-/**
- * Orchestrates email notifications for various record events.
- */
-const notifyStakeholders = async (
+interface NotifyOptions {
+  isForwarding?: boolean;
+  checkKpi?: boolean;
+}
+
+export const notifyStakeholders = async (
   record: any,
-  options: { isForwarding?: boolean; checkKpi?: boolean } = {},
+  options: NotifyOptions = {}
 ) => {
   const { isForwarding = false, checkKpi = false } = options;
 
   try {
-    // 1. Parallel Fetching of Court and Admins
+    // 1️⃣ Parallel fetch Court & Admins
     const [court, admins] = await Promise.all([
       Court.findById(record.courtStation).lean<ICourt>(),
       User.find({ role: { $regex: /^admin$/i } })
         .select("email")
-        .lean(),
+        .lean<{ email: string }[]>(),
     ]);
 
+    if (!court) return;
+
+    // 2️⃣ Prepare recipients
     const recipients = Array.from(
       new Set(
-        [...admins.map((a) => a.email), court?.primaryEmail]
+        [...admins.map((a) => a.email), court.primaryEmail]
           .filter(Boolean)
-          .map((e) => e!.toLowerCase().trim()),
-      ),
+          .map((e) => e!.toLowerCase().trim())
+      )
     );
-
     if (!recipients.length) return;
 
-    // 2. Data Preparation
+    // 3️⃣ Compute lead time
     const receiptLeadTime =
       record.receivingLeadTime ??
       calculateLeadTime(record.dateOfReceipt, record.dateReceived) ??
@@ -50,23 +54,24 @@ const notifyStakeholders = async (
     const emailData = {
       causeNo: record.causeNo,
       deceasedName: record.nameOfDeceased,
-      courtName: court?.name || "Registry Station",
+      courtName: court.name,
       reason: record.rejectionReason || "No reason provided",
       leadTime: receiptLeadTime,
       approvalDate: record.dateReceived || record.updatedAt,
     };
 
-    const jobs: { to: string; subject: string; html: string }[] = [];
+    // 4️⃣ Prepare jobs array
+    const jobs: { to: string; subject: string; html: string; text?: string }[] = [];
     let kpiTriggered = false;
 
-    // 3. KPI Logic
-    if (checkKpi && Number(receiptLeadTime) >= 30 && !record.kpiAlertSent) {
+    // KPI warning
+    if (checkKpi && receiptLeadTime >= 30 && !record.kpiAlertSent) {
       const warning = emailTemplates.leadTimeWarning(emailData);
       recipients.forEach((to) => jobs.push({ to, ...warning }));
       kpiTriggered = true;
     }
 
-    // 4. Template Selection
+    // Record status email
     let template;
     if (isForwarding) {
       template = emailTemplates.recordForwarded(emailData);
@@ -77,19 +82,22 @@ const notifyStakeholders = async (
     }
     recipients.forEach((to) => jobs.push({ to, ...template }));
 
-    // 5. Batched Execution
+    // 5️⃣ Batch execution
     for (let i = 0; i < jobs.length; i += BATCH_SIZE) {
       const batch = jobs.slice(i, i + BATCH_SIZE);
-      await Promise.allSettled(batch.map((job) => sendMail(job)));
+      await Promise.allSettled(
+        batch.map((job) =>
+          sendEmailToCourt(court._id.toString(), job.subject, job.html, job.text)
+        )
+      );
     }
 
+    // 6️⃣ Update KPI flag
     if (kpiTriggered) {
-      await Record.findByIdAndUpdate(record._id, {
-        $set: { kpiAlertSent: true },
-      });
+      await Record.findByIdAndUpdate(record._id, { $set: { kpiAlertSent: true } });
     }
   } catch (error) {
-    console.error(`Notification Error for Record ${record._id}:`, error);
+    console.error(`Notification error for record ${record._id}:`, error);
   }
 };
 
