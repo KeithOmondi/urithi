@@ -6,14 +6,13 @@ import {
   getAllRecordsForAdmin,
   getRecordById,
   updateRejection
-} from "../controllers/gp.controller"; // Assuming your controller is named this
+} from "../controllers/gp.controller";
 import { protect, restrictTo } from "../middlewares/auth.middleware";
-import { UserRole } from "../models/User";
 import { upload } from "../config/cloudinary";
 
 const router = Router();
 
-// 🔐 1. Authenticate ALL routes
+// 🔐 Authenticate all routes
 router.use(protect);
 
 /* =====================================
@@ -28,39 +27,50 @@ router.get(
 /* =====================================
    GP ONLY ROUTES
 ===================================== */
-// Dashboard: Get GP-specific records
+// Dashboard: GP-specific records
 router.get(
   "/dashboard", 
   restrictTo("gp"), 
   getGpDashboard
 );
 
-// Profile: Manage GP account details
+// Profile: GP details
 router.get(
   "/profile", 
   restrictTo("gp"), 
   getGpProfile
 );
 
-// Create Rejection: (with file upload)
+// Create Rejection: GP only, with Cloudinary upload
 router.post(
   "/reject", 
   restrictTo("gp"), 
   upload.single("file"), 
-  createRejectionRecord
+  async (req, res, next) => {
+    try {
+      // Cloudinary URL is already in req.file.path thanks to CloudinaryStorage
+      if (!req.file) {
+        return res.status(400).json({ message: "File is required" });
+      }
+
+      return createRejectionRecord(req, res);
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  }
 );
 
 /* =====================================
-   SHARED ROUTES (Admin & GP)
+   SHARED ROUTES
 ===================================== */
-// View specific record
+// Fetch single record (Admin & GP)
 router.get(
   "/:id", 
   restrictTo("admin", "gp"), 
   getRecordById
 );
 
-// Update record (Used by GP to rectify, or Admin to edit)
+// Update record (GP rectification)
 router.put(
   "/update/:id", 
   restrictTo("gp"), 
