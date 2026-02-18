@@ -45,8 +45,8 @@ export const getGpDashboard = async (req: CustomRequest, res: Response) => {
 };
 
 /* =====================================
-   CREATE REJECTION RECORD
-   - Fixed: Now accepts courtStation from body
+   CREATE REJECTION RECORD (DEV DEBUG VERSION)
+   - Added logging and user-friendly error messages
 ===================================== */
 export const createRejectionRecord = async (
   req: CustomRequest,
@@ -55,10 +55,23 @@ export const createRejectionRecord = async (
   try {
     const { causeNo, deceasedName, rejectionReason, dateOfRejection, courtStation } = req.body;
 
+    // 🔹 Log incoming data for debugging
+    console.log("=== Incoming Rejection Submission ===");
+    console.log("BODY:", req.body);
+    console.log("FILE:", req.file);
+    console.log("USER:", req.user);
+
     // Validation for all required fields including the file
     if (!causeNo || !deceasedName || !rejectionReason || !courtStation || !req.file) {
+      let missingFields: string[] = [];
+      if (!causeNo) missingFields.push("Cause No");
+      if (!deceasedName) missingFields.push("Deceased Name");
+      if (!rejectionReason) missingFields.push("Reason for Rejection");
+      if (!courtStation) missingFields.push("Court Station");
+      if (!req.file) missingFields.push("Supporting Document");
+
       return res.status(400).json({ 
-        message: "Missing required fields: Cause No, Deceased Name, Reason, Court Station, or File." 
+        message: `Submission failed. Missing required field(s): ${missingFields.join(", ")}. Please provide all required details.` 
       });
     }
 
@@ -69,7 +82,7 @@ export const createRejectionRecord = async (
       rejectionReason,
       dateReceived: dateOfRejection || new Date(),
       fileUrl: req.file.path, // Cloudinary URL from middleware
-      courtStation, // Uses the ID selected in the dropdown
+      courtStation,           // Uses the ID selected in the dropdown
       updatedBy: req.user.id,
       lastEditAction: "Initial Archive Creation",
     });
@@ -80,10 +93,17 @@ export const createRejectionRecord = async (
       .populate("courtStation", "name level")
       .lean();
 
+    console.log("✅ Rejection record created successfully:", populated);
+
     return res.status(201).json(populated);
   } catch (err: any) {
+    console.error("❌ Error creating rejection record:", err);
+
     // Handle Mongoose duplicate key error (code 11000) for causeNo
-    const message = err.code === 11000 ? "Duplicate Cause Number: This record already exists." : err.message;
+    const message = err.code === 11000
+      ? "A record with this Cause Number already exists. Please check and try again."
+      : "An unexpected error occurred while submitting the record. Please try again.";
+
     return res.status(400).json({ message });
   }
 };
