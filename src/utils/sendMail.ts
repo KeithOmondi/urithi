@@ -10,13 +10,6 @@ if (!env.BREVO_API_KEY) {
   throw new Error("❌ BREVO_API_KEY is missing in your .env file");
 }
 
-if (env.BREVO_API_KEY.startsWith("xsmtp")) {
-  console.warn(
-    "⚠️ It looks like you are using an SMTP key for the REST API. " +
-      "Please use a REST API key (starts with 'xkeysib-') for sendTransacEmail."
-  );
-}
-
 const apiClient = SibApiV3Sdk.ApiClient.instance;
 apiClient.authentications["api-key"].apiKey = env.BREVO_API_KEY;
 
@@ -33,11 +26,12 @@ export interface SendMailOptions {
   text?: string;
   replyTo?: string;
   cc?: string | string[];
-  includeDefaultCC?: boolean;
 }
 
 /* =========================================================
    CORE SEND FUNCTION
+   - Sends exactly to what is passed
+   - No hidden default CCs
 ========================================================= */
 
 export const sendMail = async ({
@@ -47,77 +41,72 @@ export const sendMail = async ({
   text,
   replyTo,
   cc,
-  includeDefaultCC = true,
 }: SendMailOptions) => {
   try {
-    const toList = Array.isArray(to) ? to.map((email) => ({ email })) : [{ email: to }];
-
-    const defaultCCList =
-      includeDefaultCC && env.MAIL_FROM_EMAIL ? [{ email: env.MAIL_FROM_EMAIL }] : [];
-
-    const ccListFromArgs = cc
+    const toList = Array.isArray(to)
+      ? to.map((email) => ({ email }))
+      : [{ email: to }];
+    const ccList = cc
       ? Array.isArray(cc)
         ? cc.map((email) => ({ email }))
         : [{ email: cc }]
-      : [];
+      : undefined;
 
-    const finalCcList = [...defaultCCList, ...ccListFromArgs];
-
-    const response = await transactionalApi.sendTransacEmail({
-      sender: {
-        name: env.MAIL_FROM_NAME,
-        email: env.MAIL_FROM_EMAIL,
-      },
+    return await transactionalApi.sendTransacEmail({
+      sender: { name: env.MAIL_FROM_NAME, email: env.MAIL_FROM_EMAIL },
       to: toList,
-      cc: finalCcList.length ? finalCcList : undefined,
+      cc: ccList, // only CC explicitly passed emails
       subject,
       htmlContent: html,
       textContent: text,
       replyTo: replyTo ? { email: replyTo } : undefined,
     });
-
-    console.log("📧 [EMAIL SENT]", response.messageId || "ok");
-    return response;
-  } catch (error: any) {
-    if (
-      error?.response?.body?.message?.includes("Key not found") ||
-      error?.response?.body?.code === "unauthorized"
-    ) {
-      console.error(
-        "❌ BREVO API ERROR: Key invalid or wrong type. Use a REST API key (starts with xkeysib-) for sendTransacEmail."
-      );
-    } else {
-      console.error("❌ [BREVO API ERROR]", error?.response?.body || error);
-    }
-    throw new Error("Email failed");
+  } catch (err: any) {
+    console.error("❌ Email failed:", err?.response?.body || err);
+    throw new Error(
+      "Email failed: " + (err?.response?.body?.message || err.message),
+    );
   }
 };
 
 /* =========================================================
-   HELPER TO SEND EMAILS TO COURTS
+   USER EMAIL HELPER
+   - For sending to a single user
+   - No CC, no default addresses
+========================================================= */
+
+export const sendEmailToUser = async (
+  email: string,
+  subject: string,
+  html: string,
+  text?: string,
+) => {
+  return sendMail({
+    to: email,
+    subject,
+    html,
+    text,
+  });
+};
+
+/* =========================================================
+   COURT EMAIL HELPER
+   - Sends to primary email
+   - CCs secondary emails only
 ========================================================= */
 
 export const sendEmailToCourt = async (
   courtId: string,
   subject: string,
   html: string,
-  text?: string
+  text?: string,
 ) => {
   const court: ICourt | null = await Court.findById(courtId);
   if (!court) throw new Error("Court not found");
 
-  // TO: Primary email of the court
-  const to = court.primaryEmail;
-
-  // CC: Secondary emails + our system email
-  const cc: string[] = [];
-  if (court.secondaryEmails?.length) cc.push(...court.secondaryEmails);
-
-  // MAIL_FROM_EMAIL is automatically included in sendMail by default, so no need to add manually
-
   return sendMail({
-    to,
-    cc: cc.length ? cc : undefined,
+    to: court.primaryEmail,
+    cc: court.secondaryEmails?.length ? court.secondaryEmails : undefined,
     subject,
     html,
     text,

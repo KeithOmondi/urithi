@@ -1,8 +1,6 @@
 import { v2 as cloudinary } from "cloudinary";
 import multer from "multer";
 import { env } from "./env";
-import path from "path";
-import fs from "fs";
 
 // Configure Cloudinary
 cloudinary.config({

@@ -6,7 +6,6 @@ import Record, {
   StatusAtGP,
 } from "../models/record.model";
 import Court, { ICourt } from "../models/court.model";
-import { User } from "../models/User";
 import { sendEmailToCourt } from "../utils/sendMail";
 import { getNextSequence } from "../utils/counter";
 import { emailTemplates } from "../utils/emailTemplates";
@@ -18,34 +17,20 @@ interface NotifyOptions {
   checkKpi?: boolean;
 }
 
+/* =========================================================
+   STAKEHOLDER NOTIFICATION
+   ONLY COURT EMAILS (primary + secondary)
+========================================================= */
 export const notifyStakeholders = async (
   record: any,
-  options: NotifyOptions = {}
+  options: NotifyOptions = {},
 ) => {
   const { isForwarding = false, checkKpi = false } = options;
 
   try {
-    // 1️⃣ Parallel fetch Court & Admins
-    const [court, admins] = await Promise.all([
-      Court.findById(record.courtStation).lean<ICourt>(),
-      User.find({ role: { $regex: /^admin$/i } })
-        .select("email")
-        .lean<{ email: string }[]>(),
-    ]);
-
+    const court = await Court.findById(record.courtStation).lean<ICourt>();
     if (!court) return;
 
-    // 2️⃣ Prepare recipients
-    const recipients = Array.from(
-      new Set(
-        [...admins.map((a) => a.email), court.primaryEmail]
-          .filter(Boolean)
-          .map((e) => e!.toLowerCase().trim())
-      )
-    );
-    if (!recipients.length) return;
-
-    // 3️⃣ Compute lead time
     const receiptLeadTime =
       record.receivingLeadTime ??
       calculateLeadTime(record.dateOfReceipt, record.dateReceived) ??
@@ -60,14 +45,13 @@ export const notifyStakeholders = async (
       approvalDate: record.dateReceived || record.updatedAt,
     };
 
-    // 4️⃣ Prepare jobs array
-    const jobs: { to: string; subject: string; html: string; text?: string }[] = [];
+    const jobs: { subject: string; html: string; text?: string }[] = [];
     let kpiTriggered = false;
 
     // KPI warning
     if (checkKpi && receiptLeadTime >= 30 && !record.kpiAlertSent) {
       const warning = emailTemplates.leadTimeWarning(emailData);
-      recipients.forEach((to) => jobs.push({ to, ...warning }));
+      jobs.push(warning);
       kpiTriggered = true;
     }
 
@@ -80,27 +64,37 @@ export const notifyStakeholders = async (
     } else {
       template = emailTemplates.recordApproved(emailData);
     }
-    recipients.forEach((to) => jobs.push({ to, ...template }));
+    jobs.push(template);
 
-    // 5️⃣ Batch execution
+    // Send emails in batches
     for (let i = 0; i < jobs.length; i += BATCH_SIZE) {
       const batch = jobs.slice(i, i + BATCH_SIZE);
       await Promise.allSettled(
         batch.map((job) =>
-          sendEmailToCourt(court._id.toString(), job.subject, job.html, job.text)
-        )
+          sendEmailToCourt(
+            court._id.toString(),
+            job.subject,
+            job.html,
+            job.text,
+          ),
+        ),
       );
     }
 
-    // 6️⃣ Update KPI flag
+    // Update KPI alert flag
     if (kpiTriggered) {
-      await Record.findByIdAndUpdate(record._id, { $set: { kpiAlertSent: true } });
+      await Record.findByIdAndUpdate(record._id, {
+        $set: { kpiAlertSent: true },
+      });
     }
   } catch (error) {
     console.error(`Notification error for record ${record._id}:`, error);
   }
 };
 
+/* =========================================================
+   CREATE RECORD
+========================================================= */
 export const createRecord = async (req: Request, res: Response) => {
   const session = await mongoose.startSession();
   try {
@@ -121,7 +115,7 @@ export const createRecord = async (req: Request, res: Response) => {
 
     await session.commitTransaction();
 
-    // Background notification
+    // Notify court in background
     notifyStakeholders(record.toObject(), { checkKpi: true });
 
     return res.status(201).json(record);
@@ -133,6 +127,9 @@ export const createRecord = async (req: Request, res: Response) => {
   }
 };
 
+/* =========================================================
+   UPDATE RECORD
+========================================================= */
 export const updateRecord = async (
   req: Request<{ id: string }> & { user?: any },
   res: Response,
@@ -150,7 +147,6 @@ export const updateRecord = async (
 
     const updatedDoc = await Record.findById(record._id)
       .populate("courtStation", "name level")
-      .populate("updatedBy", "firstName lastName pjNumber")
       .lean();
 
     notifyStakeholders(updatedDoc, {
@@ -164,6 +160,9 @@ export const updateRecord = async (
   }
 };
 
+/* =========================================================
+   GET RECORD BY ID
+========================================================= */
 export const getRecordById = async (
   req: Request<{ id: string }>,
   res: Response,
@@ -171,7 +170,6 @@ export const getRecordById = async (
   try {
     const record = await Record.findById(req.params.id)
       .populate("courtStation", "name level")
-      .populate("updatedBy", "firstName lastName pjNumber")
       .lean();
 
     if (!record) return res.status(404).json({ message: "Record not found" });
@@ -181,6 +179,9 @@ export const getRecordById = async (
   }
 };
 
+/* =========================================================
+   DELETE RECORD
+========================================================= */
 export const deleteRecord = async (
   req: Request<{ id: string }>,
   res: Response,
@@ -194,6 +195,9 @@ export const deleteRecord = async (
   }
 };
 
+/* =========================================================
+   BULK UPDATE: DATE FORWARDED TO GP
+========================================================= */
 export const updateMultipleRecordsDateForwarded = async (
   req: any,
   res: Response,
@@ -227,24 +231,25 @@ export const updateMultipleRecordsDateForwarded = async (
 
     const updatedRecords = await Record.find({ _id: { $in: validIds } })
       .populate("courtStation", "name level")
-      .populate("updatedBy", "firstName lastName pjNumber");
+      .lean();
 
     updatedRecords.forEach((r) =>
-      notifyStakeholders(r.toObject(), { isForwarding: true }),
+      notifyStakeholders(r, { isForwarding: true }),
     );
 
-    return res
-      .status(200)
-      .json({
-        success: true,
-        modifiedCount: operations.length,
-        records: updatedRecords,
-      });
+    return res.status(200).json({
+      success: true,
+      modifiedCount: operations.length,
+      records: updatedRecords,
+    });
   } catch (err: any) {
     return res.status(500).json({ message: err.message });
   }
 };
 
+/* =========================================================
+   ADMIN FETCH / FILTER
+========================================================= */
 export const getRecordsForAdmin = async (req: Request, res: Response) => {
   try {
     const {
@@ -288,6 +293,9 @@ export const getRecordsForAdmin = async (req: Request, res: Response) => {
   }
 };
 
+/* =========================================================
+   STATS & ANALYTICS
+========================================================= */
 export const getRecordStats = async (_req: Request, res: Response) => {
   try {
     const [stats] = await Record.aggregate([
@@ -342,12 +350,8 @@ export const getRecordStats = async (_req: Request, res: Response) => {
 };
 
 /* =========================================================
-   VERIFICATION & BATCH UPDATES
+   RECORD VERIFICATION
 ========================================================= */
-
-/**
- * Marks multiple records as Published once verified.
- */
 export const verifyRecords = async (req: Request, res: Response) => {
   try {
     const { ids } = req.body;
@@ -381,12 +385,8 @@ export const verifyRecords = async (req: Request, res: Response) => {
 };
 
 /* =========================================================
-   FETCHING & LISTS
+   GENERAL FETCHES
 ========================================================= */
-
-/**
- * Retrieves all records with essential administrative fields.
- */
 export const getAllRecords = async (_req: Request, res: Response) => {
   try {
     const records = await Record.find()
@@ -399,44 +399,33 @@ export const getAllRecords = async (_req: Request, res: Response) => {
       `,
       )
       .populate("courtStation", "name level")
-      .populate("updatedBy", "firstName lastName pjNumber")
-      .sort({ createdAt: -1 })
       .lean();
 
-    return res.status(200).json({
-      success: true,
-      count: records.length,
-      records,
-    });
+    return res
+      .status(200)
+      .json({ success: true, count: records.length, records });
   } catch (err: any) {
     return res.status(500).json({ message: "Failed to fetch records" });
   }
 };
 
-/**
- * Filters records by a specific court station.
- */
 export const getRecordsByCourt = async (
   req: Request<{ courtId: string }>,
   res: Response,
 ) => {
   try {
     const { courtId } = req.params;
-
-    if (!Types.ObjectId.isValid(courtId)) {
+    if (!Types.ObjectId.isValid(courtId))
       return res.status(400).json({ message: "Invalid Court ID format" });
-    }
 
     const records = await Record.find({ courtStation: courtId })
       .populate("courtStation", "name")
       .sort({ createdAt: -1 })
       .lean();
 
-    return res.status(200).json({
-      success: true,
-      count: records.length,
-      records,
-    });
+    return res
+      .status(200)
+      .json({ success: true, count: records.length, records });
   } catch (err: any) {
     return res.status(500).json({ message: "Failed to fetch court records" });
   }

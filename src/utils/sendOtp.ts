@@ -1,10 +1,10 @@
 import crypto from "crypto";
 import { User } from "../models/User";
-import sendMail from "./sendMail";
+import { sendEmailToUser } from "./sendMail";
 import { emailTemplates } from "./emailTemplates";
 
 /**
- * Generate, hash, save, and email OTP
+ * Generate, hash, save, and email OTP to a user
  */
 export const sendOtp = async (user: typeof User.prototype) => {
   if (!user.email) throw new Error("User has no email set.");
@@ -23,8 +23,13 @@ export const sendOtp = async (user: typeof User.prototype) => {
   // Prepare email content
   const mailData = emailTemplates.loginOtp(otp);
 
-  // Send email only to user (no CC)
-  await sendMail({ ...mailData, to: user.email, includeDefaultCC: false });
+  // Send OTP only to this user (no CC)
+  await sendEmailToUser(
+    user.email,
+    mailData.subject,
+    mailData.html,
+    mailData.text,
+  );
 
   return otp;
 };

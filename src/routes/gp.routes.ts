@@ -5,7 +5,8 @@ import {
   createRejectionRecord,
   getAllRecordsForAdmin,
   getRecordById,
-  updateRejection
+  updateRejection,
+  proxyFilePreview
 } from "../controllers/gp.controller"; // Assuming your controller is named this
 import { protect, restrictTo } from "../middlewares/auth.middleware";
 import { upload } from "../config/cloudinary";
@@ -68,5 +69,9 @@ router.put(
   restrictTo("gp"), 
   updateRejection
 );
+
+
+router.get("/admin/proxy-view/:id", restrictTo("admin", "gp"), proxyFilePreview);
+
 
 export default router;
