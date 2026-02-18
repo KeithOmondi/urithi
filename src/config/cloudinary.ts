@@ -21,24 +21,31 @@ export const upload = multer({
 
 
 export const uploadToCloudinary = async (file: Express.Multer.File) => {
-  return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      {
-        folder: "judiciary_rejections",
-        resource_type: "auto",
-        public_id: `reject_${Date.now()}`,
-      },
-      (error, result) => {
-        if (error) {
-          console.error("❌ Cloudinary upload error:", error);
-          return reject(error);
+  try {
+    return await new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          folder: "judiciary_rejections",
+          resource_type: "auto",
+          public_id: `reject_${Date.now()}`,
+        },
+        (error, result) => {
+          if (error) {
+            console.error("❌ Cloudinary upload error:", error);
+            reject(error);
+          } else {
+            resolve(result);
+          }
         }
-        resolve(result);
-      }
-    );
-    stream.end(file.buffer);
-  });
+      );
+      stream.end(file.buffer);
+    });
+  } catch (error) {
+    console.error("Unexpected upload error:", error);
+    throw error;
+  }
 };
+
 
 
 export default cloudinary;
