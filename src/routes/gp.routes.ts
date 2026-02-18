@@ -21,7 +21,7 @@ router.use(protect);
 ===================================== */
 router.get(
   "/admin/all-records", 
-  restrictTo(UserRole.ADMIN), 
+  restrictTo("admin"), 
   getAllRecordsForAdmin
 );
 
@@ -31,21 +31,21 @@ router.get(
 // Dashboard: Get GP-specific records
 router.get(
   "/dashboard", 
-  restrictTo(UserRole.GP), 
+  restrictTo("gp"), 
   getGpDashboard
 );
 
 // Profile: Manage GP account details
 router.get(
   "/profile", 
-  restrictTo(UserRole.GP), 
+  restrictTo("gp"), 
   getGpProfile
 );
 
 // Create Rejection: (with file upload)
 router.post(
   "/reject", 
-  restrictTo(UserRole.GP), 
+  restrictTo("gp"), 
   upload.single("file"), 
   createRejectionRecord
 );
@@ -56,14 +56,14 @@ router.post(
 // View specific record
 router.get(
   "/:id", 
-  restrictTo(UserRole.ADMIN, UserRole.GP), 
+  restrictTo("admin", "gp"), 
   getRecordById
 );
 
 // Update record (Used by GP to rectify, or Admin to edit)
 router.put(
   "/update/:id", 
-  restrictTo(UserRole.ADMIN, UserRole.GP), 
+  restrictTo("gp"), 
   updateRejection
 );
 
