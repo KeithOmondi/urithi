@@ -7,10 +7,11 @@ export enum RejectionStatus {
 
 export interface IRejection extends Document {
   causeNo: string;
+  deceasedName: string; // Added field
   rejectionReason: string;
   dateReceived: Date;
   fileUrl: string;
-  courtStation: mongoose.Types.ObjectId;
+  courtStation: mongoose.Types.ObjectId; // References Court model
   updatedBy: mongoose.Types.ObjectId;
   status: RejectionStatus;
   lastEditAction: string;
@@ -24,6 +25,11 @@ const rejectionSchema = new Schema<IRejection>(
       required: true, 
       unique: true, 
       uppercase: true, 
+      trim: true 
+    },
+    deceasedName: { 
+      type: String, 
+      required: true, 
       trim: true 
     },
     rejectionReason: { 
@@ -40,8 +46,8 @@ const rejectionSchema = new Schema<IRejection>(
     },
     courtStation: { 
       type: Schema.Types.ObjectId, 
-      ref: "CourtStation", 
-      required: false, 
+      ref: "Court", // Ensure this matches your Court model name
+      required: true, 
     },
     updatedBy: { 
       type: Schema.Types.ObjectId, 
