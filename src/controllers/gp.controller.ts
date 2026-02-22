@@ -50,19 +50,28 @@ export const getGpDashboard = async (req: CustomRequest, res: Response) => {
 /* =====================================
    CREATE REJECTION RECORD
 ===================================== */
-export const createRejectionRecord = async (req: CustomRequest, res: Response) => {
+export const createRejectionRecord = async (
+  req: CustomRequest,
+  res: Response,
+) => {
   try {
     if (!req.user) return res.status(401).json({ message: "Unauthorized" });
 
-    const { causeNo, deceasedName, rejectionReason, dateOfRejection, courtStation } = req.body;
-    
+    const {
+      causeNo,
+      deceasedName,
+      rejectionReason,
+      dateOfRejection,
+      courtStation,
+    } = req.body;
+
     // 1. Validate other required text fields
     if (!causeNo || !deceasedName || !rejectionReason || !courtStation) {
       return res.status(400).json({ message: "Required fields missing" });
     }
 
     // 2. Conditional Cloudinary Upload
-    let fileUrl = ""; 
+    let fileUrl = "";
     if (req.file) {
       const cloudResult: any = await uploadToCloudinary(req.file);
       if (!cloudResult?.secure_url) {
@@ -86,7 +95,6 @@ export const createRejectionRecord = async (req: CustomRequest, res: Response) =
       status: "success",
       data: created.toObject(),
     });
-    
   } catch (err: any) {
     console.error("❌ Creation Error:", err);
     return res.status(500).json({
@@ -101,7 +109,10 @@ export const createRejectionRecord = async (req: CustomRequest, res: Response) =
 /* =====================================
    FETCH ALL RECORDS (ADMIN ONLY)
 ===================================== */
-export const getAllRecordsForAdmin = async (req: CustomRequest, res: Response) => {
+export const getAllRecordsForAdmin = async (
+  req: CustomRequest,
+  res: Response,
+) => {
   try {
     const records = await Rejection.find()
       .populate("courtStation", "name level")
@@ -144,12 +155,13 @@ export const updateRejection = async (req: CustomRequest, res: Response) => {
     const updatedRecord = await Rejection.findByIdAndUpdate(
       id,
       { $set: updates },
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     )
       .populate("updatedBy", "firstName lastName")
       .populate("courtStation", "name");
 
-    if (!updatedRecord) return res.status(404).json({ message: "Record not found" });
+    if (!updatedRecord)
+      return res.status(404).json({ message: "Record not found" });
     return res.status(200).json(updatedRecord);
   } catch (err: any) {
     return res.status(400).json({ message: err.message });
@@ -168,9 +180,9 @@ export const proxyFilePreview = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "File not found" });
 
     // Extract public ID from URL
-    const urlParts = record.fileUrl.split('/');
-    const uploadIndex = urlParts.indexOf('upload');
-    const publicIdWithExt = urlParts.slice(uploadIndex + 2).join('/');
+    const urlParts = record.fileUrl.split("/");
+    const uploadIndex = urlParts.indexOf("upload");
+    const publicIdWithExt = urlParts.slice(uploadIndex + 2).join("/");
 
     const isPdf = publicIdWithExt.endsWith(".pdf");
     const resourceType = isPdf ? "raw" : "image";
@@ -192,7 +204,6 @@ export const proxyFilePreview = async (req: Request, res: Response) => {
   }
 };
 
-
 /* =====================================
    LOOKUP DECEASED NAME
 ===================================== */
@@ -201,7 +212,9 @@ export const lookupDeceasedName = async (req: any, res: Response) => {
     const { causeNo, courtStation } = req.query;
 
     if (!causeNo || !courtStation) {
-      return res.status(400).json({ message: "Cause number and station are required" });
+      return res
+        .status(400)
+        .json({ message: "Cause number and station are required" });
     }
 
     if (!mongoose.Types.ObjectId.isValid(courtStation as string)) {
@@ -223,7 +236,6 @@ export const lookupDeceasedName = async (req: any, res: Response) => {
     }
 
     return res.json({ deceasedName: recordEntry.nameOfDeceased });
-
   } catch (err: any) {
     console.error(err);
     return res.status(500).json({ message: "Internal server error" });
