@@ -3,7 +3,8 @@ import { User } from "../models/User";
 import Rejection from "../models/go.model";
 import { uploadToCloudinary } from "../config/cloudinary";
 import { v2 as cloudinary } from "cloudinary";
-import axios from "axios"
+import Record from "../models/record.model";
+import mongoose from "mongoose";
 
 interface CustomRequest extends Request {
   user?: any;
@@ -52,24 +53,31 @@ export const getGpDashboard = async (req: CustomRequest, res: Response) => {
 export const createRejectionRecord = async (req: CustomRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ message: "Unauthorized" });
-    if (!req.file) return res.status(400).json({ message: "File is missing" });
 
     const { causeNo, deceasedName, rejectionReason, dateOfRejection, courtStation } = req.body;
+    
+    // 1. Validate other required text fields
     if (!causeNo || !deceasedName || !rejectionReason || !courtStation) {
       return res.status(400).json({ message: "Required fields missing" });
     }
 
-    const cloudResult: any = await uploadToCloudinary(req.file);
-    if (!cloudResult?.secure_url) {
-      throw new Error("Cloudinary upload failed");
+    // 2. Conditional Cloudinary Upload
+    let fileUrl = ""; 
+    if (req.file) {
+      const cloudResult: any = await uploadToCloudinary(req.file);
+      if (!cloudResult?.secure_url) {
+        throw new Error("Cloudinary upload failed");
+      }
+      fileUrl = cloudResult.secure_url;
     }
 
+    // 3. Create Record
     const created = await Rejection.create({
       causeNo: causeNo.toUpperCase().trim(),
       deceasedName: deceasedName.trim(),
       rejectionReason,
       dateReceived: dateOfRejection || new Date(),
-      fileUrl: cloudResult.secure_url,
+      fileUrl, // Will be an empty string or the Cloudinary URL
       courtStation,
       updatedBy: req.user.id,
     });
@@ -78,7 +86,9 @@ export const createRejectionRecord = async (req: CustomRequest, res: Response) =
       status: "success",
       data: created.toObject(),
     });
+    
   } catch (err: any) {
+    console.error("❌ Creation Error:", err);
     return res.status(500).json({
       message:
         err.code === 11000
@@ -181,3 +191,42 @@ export const proxyFilePreview = async (req: Request, res: Response) => {
     res.status(500).json({ error: "Failed to generate preview" });
   }
 };
+
+
+/* =====================================
+   LOOKUP DECEASED NAME
+===================================== */
+export const lookupDeceasedName = async (req: any, res: Response) => {
+  try {
+    const { causeNo, courtStation } = req.query;
+
+    if (!causeNo || !courtStation) {
+      return res.status(400).json({ message: "Cause number and station are required" });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(courtStation as string)) {
+      return res.status(400).json({ message: "Invalid Station ID" });
+    }
+
+    const rawCauseNo = (causeNo as string).trim().toUpperCase();
+
+    const slashFormat = rawCauseNo.replace(/\s+OF\s+/g, "/");
+    const ofFormat = rawCauseNo.replace(/\//g, " OF ");
+
+    const recordEntry = await Record.findOne({
+      causeNo: { $in: [slashFormat, ofFormat] },
+      courtStation: new mongoose.Types.ObjectId(courtStation as string),
+    }).select("nameOfDeceased");
+
+    if (!recordEntry) {
+      return res.status(404).json({ message: "No record found" });
+    }
+
+    return res.json({ deceasedName: recordEntry.nameOfDeceased });
+
+  } catch (err: any) {
+    console.error(err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+

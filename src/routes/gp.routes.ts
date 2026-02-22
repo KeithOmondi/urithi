@@ -6,7 +6,8 @@ import {
   getAllRecordsForAdmin,
   getRecordById,
   updateRejection,
-  proxyFilePreview
+  proxyFilePreview,
+  lookupDeceasedName
 } from "../controllers/gp.controller"; // Assuming your controller is named this
 import { protect, restrictTo } from "../middlewares/auth.middleware";
 import { upload } from "../config/cloudinary";
@@ -21,6 +22,7 @@ router.use(protect);
 ===================================== */
 router.get(
   "/admin/all-records", 
+  protect,
   restrictTo("admin"), 
   getAllRecordsForAdmin
 );
@@ -31,6 +33,7 @@ router.get(
 // Dashboard: Get GP-specific records
 router.get(
   "/dashboard", 
+  protect,
   restrictTo("gp"), 
   getGpDashboard
 );
@@ -38,6 +41,7 @@ router.get(
 // Profile: Manage GP account details
 router.get(
   "/profile", 
+  protect,
   restrictTo("gp"), 
   getGpProfile
 );
@@ -46,6 +50,7 @@ router.get(
 // Create Rejection: (with file upload & debug logs)
 router.post(
   "/reject",
+  protect,
   restrictTo("gp"),
   upload.single("file"),
   createRejectionRecord
@@ -58,7 +63,16 @@ router.post(
 ===================================== */
 // View specific record
 router.get(
+  "/lookup", 
+  protect, 
+  restrictTo("admin", "gp"), 
+  lookupDeceasedName
+);  
+
+
+router.get(
   "/:id", 
+  protect,
   restrictTo("admin", "gp"), 
   getRecordById
 );
@@ -66,12 +80,12 @@ router.get(
 // Update record (Used by GP to rectify, or Admin to edit)
 router.put(
   "/update/:id", 
+  protect,
   restrictTo("gp"), 
   updateRejection
 );
 
 
-router.get("/admin/proxy-view/:id", restrictTo("admin", "gp"), proxyFilePreview);
-
+router.get("/admin/proxy-view/:id", protect, restrictTo("admin", "gp"), proxyFilePreview);
 
 export default router;

@@ -172,5 +172,5 @@ recordSchema.pre("findOneAndUpdate", async function () {
    EXPORT
 ====================================================== */
 
-export default mongoose.models.Record ||
-  mongoose.model<IRecord>("Record", recordSchema);
+const Record = mongoose.models.Record || mongoose.model<IRecord>("Record", recordSchema);
+export default Record;;
