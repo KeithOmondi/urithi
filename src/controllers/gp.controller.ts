@@ -229,4 +229,3 @@ export const lookupDeceasedName = async (req: any, res: Response) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
-
