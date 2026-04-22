@@ -99,7 +99,17 @@ export const createRecord = async (req: Request, res: Response) => {
   const session = await mongoose.startSession();
   try {
     session.startTransaction();
-    const nextNo = await getNextSequence("record");
+    
+    let nextNo = await getNextSequence("record");
+
+    // Double-check if this 'no' exists (Safety Net)
+    const exists = await Record.findOne({ no: nextNo }).session(session);
+    if (exists) {
+        // If it exists, the counter is out of sync. 
+        // We find the actual max and increment from there.
+        const maxRecord = await Record.findOne().sort({ no: -1 }).session(session);
+        nextNo = maxRecord ? maxRecord.no + 1 : 1;
+    }
 
     const [record] = await Record.create(
       [
@@ -114,13 +124,19 @@ export const createRecord = async (req: Request, res: Response) => {
     );
 
     await session.commitTransaction();
-
-    // Notify court in background
     notifyStakeholders(record.toObject(), { checkKpi: true });
-
     return res.status(201).json(record);
+
   } catch (err: any) {
     await session.abortTransaction();
+    
+    // Check if it's the duplicate key error specifically
+    if (err.code === 11000) {
+        return res.status(409).json({ 
+            message: "Duplicate record number detected. Please try saving again." 
+        });
+    }
+    
     return res.status(500).json({ message: err.message });
   } finally {
     session.endSession();

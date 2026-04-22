@@ -1,14 +1,14 @@
 import "dotenv/config"; // Load .env
 import mongoose from "mongoose";
 import { env } from "./config/env";
-import { User, UserRole } from "./models/User"; // Import User model & enum
+import { User, UserRole } from "./models/User";
 
 // Seed data
 const users = [
   {
     firstName: "Hon. Clara",
     lastName: "Otieno",
-    email: "kd.omondi1@gmail.com",
+    email: "claraotieno23@gmail.com",
     pjNumber: "43244",
     role: UserRole.ADMIN,
   },
@@ -57,34 +57,59 @@ const users = [
   {
     firstName: "Dennis",
     lastName: "Keith",
-    email: "denniskeith62@@gmail.com",
+    email: "denniskeith62@gmail.com",
     pjNumber: "00045",
     role: UserRole.USER,
   },
+{
+    firstName: "Eva",
+    lastName: "Kimeiywo",
+    email: "evakimeiywo@gmail.com",
+    pjNumber: "00000",
+    role: UserRole.GP,
+  },
+  {
+    firstName: "Miriam",
+    lastName: "Nderitu",
+    email: "mirndesh@gmail.com",
+    pjNumber: "00001",
+    role: UserRole.GP,
+  },
+  {
+    firstName: "Hon. E.",
+    lastName: "Malizu",
+    email: "malizuedith@gmail.com",
+    pjNumber: "12345",
+    role: UserRole.GP,
+  },
+  
 ];
 
 async function seedUsers() {
   try {
-    // Connect to MongoDB with explicit DB name
     await mongoose.connect(env.MONGO_URI, { dbName: env.DB_NAME });
     console.log(`✅ Connected to MongoDB: ${mongoose.connection.name}`);
 
-    // Clear existing users
-    await User.deleteMany({});
-    console.log("🧹 Cleared existing users");
+    // 1. REMOVED: await User.deleteMany({}); 
+    // This ensures existing users stay in the database.
 
-    // Seed users one by one so schema hooks run properly
-    for (const user of users) {
-      await User.create(user);
-      console.log(`👤 Seeded: ${user.firstName} ${user.lastName} (${user.pjNumber})`);
+    for (const userData of users) {
+      // 2. USE upsert logic to prevent duplicate errors 
+      // This checks if a user with that email or pjNumber already exists
+      const existingUser = await User.findOne({ 
+        $or: [{ email: userData.email }, { pjNumber: userData.pjNumber }] 
+      });
+
+      if (!existingUser) {
+        await User.create(userData);
+        console.log(`👤 Seeded New: ${userData.firstName} ${userData.lastName}`);
+      } else {
+        console.log(`⏩ Skipped (Already Exists): ${userData.firstName} ${userData.lastName}`);
+      }
     }
 
-    console.log("🎉 Successfully seeded users");
-
-    // Disconnect
+    console.log("🎉 Script execution finished");
     await mongoose.disconnect();
-    console.log("🟡 MongoDB disconnected");
-
     process.exit(0);
   } catch (err) {
     console.error("❌ Seeding error:", err);
