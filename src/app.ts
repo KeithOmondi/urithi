@@ -13,6 +13,7 @@ import userRoutes from "./routes/user.routes";
 import scanRoutes from "./routes/scan.routes";
 import  adminRoutes from "./routes/admin.routes";
 import goRoutes from "./routes/gp.routes"
+import analyticsRoutes from "./routes/analytics.routes";
 import { env } from "./config/env";
 
 const app = express();
@@ -63,6 +64,7 @@ app.use("/api/v1/user", userRoutes);
 app.use("/api/v1/gazette", scanRoutes);
 app.use("/api/v1/admin", adminRoutes);
 app.use("/api/v1/gp", goRoutes)
+app.use("/api/v1/analytics", analyticsRoutes);
 
 /* =====================================
    HEALTH CHECKS

@@ -2110,28 +2110,53 @@ const courts: Partial<ICourt>[] = [
 
 const seedCourts = async (): Promise<void> => {
   try {
-    // 🔥 Connect to MongoDB with explicit DB name
     await mongoose.connect(env.MONGO_URI, { dbName: env.DB_NAME });
     console.log(`🌍 Connected to MongoDB: ${mongoose.connection.name}`);
 
-    // Lazy-import the Court model AFTER connection
     const { Court } = await import("./models/court.model");
 
-    // Prepare bulk operations with upsert
-    const operations = courts.map((court) => ({
-      updateOne: {
-        filter: { name: court.name }, // unique field
-        update: { $set: court },
-        upsert: true,
-      },
-    }));
+    // Filter courts with valid name AND valid primaryEmail
+    const validCourts = courts.filter((court): court is typeof court & { name: string; primaryEmail: string } => 
+      court.name !== undefined && 
+      court.name !== "" && 
+      court.primaryEmail !== undefined && 
+      court.primaryEmail !== ""
+    );
+    
+    if (validCourts.length === 0) {
+      console.log("⚠️ No valid courts with names and emails found");
+      await mongoose.disconnect();
+      process.exit(0);
+      return;
+    }
 
-    const result = await Court.bulkWrite(operations);
+    console.log(`📋 Total valid courts: ${validCourts.length}`);
+    console.log(`⚠️ Skipped ${courts.length - validCourts.length} courts due to missing name or email`);
 
+    // Get existing court names
+    const existingCourts = await Court.find(
+      { name: { $in: validCourts.map(c => c.name) } },
+      { name: 1, _id: 0 }
+    );
+    
+    const existingNames = new Set(existingCourts.map(c => c.name));
+    const newCourts = validCourts.filter(court => !existingNames.has(court.name));
+    
+    if (newCourts.length === 0) {
+      console.log("✅ No new courts to add.");
+      await mongoose.disconnect();
+      process.exit(0);
+      return;
+    }
+    
+    console.log(`📋 Found ${newCourts.length} new court(s) to add:`);
+    newCourts.forEach(court => console.log(`   - ${court.name}`));
+    
+    const result = await Court.insertMany(newCourts);
+    
     console.log("🌟 Courts seeded successfully");
-    console.log(`👉 Inserted: ${result.upsertedCount}, Updated: ${result.modifiedCount}`);
+    console.log(`👉 Inserted: ${result.length} new court(s)`);
 
-    // Disconnect cleanly
     await mongoose.disconnect();
     console.log("🟡 MongoDB disconnected");
     process.exit(0);
@@ -2142,3 +2167,5 @@ const seedCourts = async (): Promise<void> => {
 };
 
 seedCourts();
+
+
