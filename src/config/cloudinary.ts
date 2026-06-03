@@ -9,14 +9,23 @@ cloudinary.config({
   api_secret: env.CLOUDINARY_API_SECRET,
 });
 
-// Use memory storage instead of cloudinary storage
+// Memory storage — keeps buffer available for both
+// Cloudinary upload and PDF parsing
 const storage = multer.memoryStorage();
+
+const fileFilter = (_req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+  if (file.mimetype === "application/pdf") {
+    cb(null, true);
+  } else {
+    cb(new Error("PDF files only!"));
+  }
+};
 
 export const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter,
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB — your gazette is 1.5MB, 5MB was too low
 });
-
 
 export const uploadToCloudinary = async (file: Express.Multer.File) => {
   try {
@@ -24,8 +33,9 @@ export const uploadToCloudinary = async (file: Express.Multer.File) => {
       const stream = cloudinary.uploader.upload_stream(
         {
           folder: "judiciary_rejections",
-          resource_type: "auto",
-          public_id: `reject_${Date.now()}`,
+          resource_type: "raw", // use "raw" for PDFs — "auto" can misidentify them
+          public_id: `gazette_${Date.now()}`,
+          format: "pdf",
         },
         (error, result) => {
           if (error) {
@@ -43,7 +53,5 @@ export const uploadToCloudinary = async (file: Express.Multer.File) => {
     throw error;
   }
 };
-
-
 
 export default cloudinary;

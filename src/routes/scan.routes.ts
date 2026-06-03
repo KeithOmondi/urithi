@@ -1,7 +1,7 @@
 import express from "express";
 import { protect } from "../middlewares/auth.middleware";
 import { scanGazette } from "../controllers/gazetteScanner.controller";
-import { upload } from "../middlewares/upload";
+import { diskUpload } from "../middlewares/upload";
 
 const router = express.Router();
 
@@ -13,7 +13,7 @@ const router = express.Router();
 router.post(
   "/scan", 
   protect, 
-  upload.single("file"), // "file" must match the key in your Postman/Frontend request
+  diskUpload.single("file"), // "file" must match the key in your Postman/Frontend request
   scanGazette
 );
 

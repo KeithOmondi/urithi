@@ -14,6 +14,8 @@ import scanRoutes from "./routes/scan.routes";
 import  adminRoutes from "./routes/admin.routes";
 import goRoutes from "./routes/gp.routes"
 import analyticsRoutes from "./routes/analytics.routes";
+import scannerRoutes from "./routes/scanner.routes";
+import extractorRoutes from "./routes/extractorRoutes"; // ADD THIS
 import { env } from "./config/env";
 
 const app = express();
@@ -34,8 +36,6 @@ app.use(
     ],
   }),
 );
-
-
 
 app.use(cookieParser());
 app.use(express.json());
@@ -65,6 +65,8 @@ app.use("/api/v1/gazette", scanRoutes);
 app.use("/api/v1/admin", adminRoutes);
 app.use("/api/v1/gp", goRoutes)
 app.use("/api/v1/analytics", analyticsRoutes);
+app.use("/api/v1/scanner", scannerRoutes);
+app.use("/api/v1/extractor", extractorRoutes); // ADD THIS - Mount extractor routes
 
 /* =====================================
    HEALTH CHECKS
