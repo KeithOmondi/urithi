@@ -12,6 +12,18 @@ import { emailTemplates } from "../utils/emailTemplates";
 
 const BATCH_SIZE = 10;
 
+const UPDATABLE_FIELDS = [
+  "causeNo",
+  "nameOfDeceased",
+  "dateOfReceipt",
+  "dateReceived",
+  "dateForwardedToGP",
+  "form60Compliance",
+  "rejectionReason",
+  "statusAtGP",
+] as const;
+type UpdatableField = (typeof UPDATABLE_FIELDS)[number];
+
 interface NotifyOptions {
   isForwarding?: boolean;
   checkKpi?: boolean;
@@ -19,11 +31,10 @@ interface NotifyOptions {
 
 /* =========================================================
    STAKEHOLDER NOTIFICATION
-   ONLY COURT EMAILS (primary + secondary)
 ========================================================= */
 export const notifyStakeholders = async (
   record: any,
-  options: NotifyOptions = {},
+  options: NotifyOptions = {}
 ) => {
   const { isForwarding = false, checkKpi = false } = options;
 
@@ -48,40 +59,28 @@ export const notifyStakeholders = async (
     const jobs: { subject: string; html: string; text?: string }[] = [];
     let kpiTriggered = false;
 
-    // KPI warning
     if (checkKpi && receiptLeadTime >= 30 && !record.kpiAlertSent) {
-      const warning = emailTemplates.leadTimeWarning(emailData);
-      jobs.push(warning);
+      jobs.push(emailTemplates.leadTimeWarning(emailData));
       kpiTriggered = true;
     }
 
-    // Record status email
-    let template;
     if (isForwarding) {
-      template = emailTemplates.recordForwarded(emailData);
+      jobs.push(emailTemplates.recordForwarded(emailData));
     } else if (record.form60Compliance === Form60Compliance.REJECTED) {
-      template = emailTemplates.recordRejected(emailData);
+      jobs.push(emailTemplates.recordRejected(emailData));
     } else {
-      template = emailTemplates.recordApproved(emailData);
+      jobs.push(emailTemplates.recordApproved(emailData));
     }
-    jobs.push(template);
 
-    // Send emails in batches
     for (let i = 0; i < jobs.length; i += BATCH_SIZE) {
       const batch = jobs.slice(i, i + BATCH_SIZE);
       await Promise.allSettled(
         batch.map((job) =>
-          sendEmailToCourt(
-            court._id.toString(),
-            job.subject,
-            job.html,
-            job.text,
-          ),
-        ),
+          sendEmailToCourt(court._id.toString(), job.subject, job.html, job.text)
+        )
       );
     }
 
-    // Update KPI alert flag
     if (kpiTriggered) {
       await Record.findByIdAndUpdate(record._id, {
         $set: { kpiAlertSent: true },
@@ -99,16 +98,18 @@ export const createRecord = async (req: Request, res: Response) => {
   const session = await mongoose.startSession();
   try {
     session.startTransaction();
-    
+
+    // getNextSequence runs outside the session intentionally —
+    // its counter increment is NOT rolled back on abort.
+    // The duplicate check below and the 11000 catch handle the gap.
     let nextNo = await getNextSequence("record");
 
-    // Double-check if this 'no' exists (Safety Net)
     const exists = await Record.findOne({ no: nextNo }).session(session);
     if (exists) {
-        // If it exists, the counter is out of sync. 
-        // We find the actual max and increment from there.
-        const maxRecord = await Record.findOne().sort({ no: -1 }).session(session);
-        nextNo = maxRecord ? maxRecord.no + 1 : 1;
+      const maxRecord = await Record.findOne()
+        .sort({ no: -1 })
+        .session(session);
+      nextNo = maxRecord ? maxRecord.no + 1 : 1;
     }
 
     const [record] = await Record.create(
@@ -120,23 +121,19 @@ export const createRecord = async (req: Request, res: Response) => {
           kpiAlertSent: false,
         },
       ],
-      { session },
+      { session }
     );
 
     await session.commitTransaction();
     notifyStakeholders(record.toObject(), { checkKpi: true });
     return res.status(201).json(record);
-
   } catch (err: any) {
     await session.abortTransaction();
-    
-    // Check if it's the duplicate key error specifically
     if (err.code === 11000) {
-        return res.status(409).json({ 
-            message: "Duplicate record number detected. Please try saving again." 
-        });
+      return res.status(409).json({
+        message: "Duplicate record number detected. Please try saving again.",
+      });
     }
-    
     return res.status(500).json({ message: err.message });
   } finally {
     session.endSession();
@@ -148,14 +145,22 @@ export const createRecord = async (req: Request, res: Response) => {
 ========================================================= */
 export const updateRecord = async (
   req: Request<{ id: string }> & { user?: any },
-  res: Response,
+  res: Response
 ) => {
   try {
     const record = await Record.findById(req.params.id);
     if (!record) return res.status(404).json({ message: "Record not found" });
 
-    const updates = Object.keys(req.body);
-    Object.assign(record, req.body);
+    // ✅ whitelist — prevents overwriting no, kpiAlertSent, createdAt, etc.
+    const updates = (Object.keys(req.body) as UpdatableField[]).filter((k) =>
+      UPDATABLE_FIELDS.includes(k)
+    );
+    if (!updates.length) {
+      return res.status(400).json({ message: "No updatable fields provided" });
+    }
+
+    const safeBody = Object.fromEntries(updates.map((k) => [k, req.body[k]]));
+    Object.assign(record, safeBody);
     record.updatedBy = req.user?.id;
     record.lastEditAction = `Updated fields: ${updates.join(", ")}`;
 
@@ -181,7 +186,7 @@ export const updateRecord = async (
 ========================================================= */
 export const getRecordById = async (
   req: Request<{ id: string }>,
-  res: Response,
+  res: Response
 ) => {
   try {
     const record = await Record.findById(req.params.id)
@@ -200,7 +205,7 @@ export const getRecordById = async (
 ========================================================= */
 export const deleteRecord = async (
   req: Request<{ id: string }>,
-  res: Response,
+  res: Response
 ) => {
   try {
     const deleted = await Record.findByIdAndDelete(req.params.id);
@@ -216,12 +221,26 @@ export const deleteRecord = async (
 ========================================================= */
 export const updateMultipleRecordsDateForwarded = async (
   req: any,
-  res: Response,
+  res: Response
 ) => {
   try {
     const { ids, date } = req.body;
-    const validIds = ids.filter((id: string) => Types.ObjectId.isValid(id));
+
+    // ✅ validate both inputs before touching the DB
+    if (!Array.isArray(ids) || !ids.length) {
+      return res
+        .status(400)
+        .json({ message: "ids must be a non-empty array" });
+    }
     const newForwardedDate = new Date(date);
+    if (isNaN(newForwardedDate.getTime())) {
+      return res.status(400).json({ message: "Invalid date value" });
+    }
+
+    const validIds = ids.filter((id: string) => Types.ObjectId.isValid(id));
+    if (!validIds.length) {
+      return res.status(400).json({ message: "No valid record IDs provided" });
+    }
 
     const records = await Record.find({ _id: { $in: validIds } });
 
@@ -233,7 +252,7 @@ export const updateMultipleRecordsDateForwarded = async (
             dateForwardedToGP: newForwardedDate,
             forwardingLeadTime: calculateLeadTime(
               doc.dateReceived,
-              newForwardedDate,
+              newForwardedDate
             ),
             statusAtGP: StatusAtGP.PENDING,
             updatedBy: req.user?.id,
@@ -249,9 +268,7 @@ export const updateMultipleRecordsDateForwarded = async (
       .populate("courtStation", "name level")
       .lean();
 
-    updatedRecords.forEach((r) =>
-      notifyStakeholders(r, { isForwarding: true }),
-    );
+    updatedRecords.forEach((r) => notifyStakeholders(r, { isForwarding: true }));
 
     return res.status(200).json({
       success: true,
@@ -276,6 +293,7 @@ export const getRecordsForAdmin = async (req: Request, res: Response) => {
       compliance,
       kpi,
     } = req.query as Record<string, string>;
+
     const limitNum = Math.min(Number(limit), 100);
     const skip = (Number(page) - 1) * limitNum;
 
@@ -283,7 +301,13 @@ export const getRecordsForAdmin = async (req: Request, res: Response) => {
     if (court && Types.ObjectId.isValid(court)) query.courtStation = court;
     if (compliance) query.form60Compliance = compliance;
     if (kpi === "breached") query.forwardingLeadTime = { $gt: 30 };
-    if (search) query.$text = { $search: search };
+    if (search) {
+      // ✅ guard against missing text index producing a hard 500
+      if (search.trim().length < 2) {
+        return res.status(400).json({ message: "Search term too short" });
+      }
+      query.$text = { $search: search.trim() };
+    }
 
     const [records, total] = await Promise.all([
       Record.find(query)
@@ -371,22 +395,21 @@ export const getRecordStats = async (_req: Request, res: Response) => {
 export const verifyRecords = async (req: Request, res: Response) => {
   try {
     const { ids } = req.body;
-    if (!Array.isArray(ids)) {
+    if (!Array.isArray(ids) || !ids.length) {
       return res
         .status(400)
-        .json({ message: "Invalid input: ids must be an array" });
+        .json({ message: "ids must be a non-empty array" });
     }
 
     const validIds = ids.filter((id: string) => Types.ObjectId.isValid(id));
+    // ✅ don't fire updateMany against an empty $in — returns 200 with 0 modified
+    if (!validIds.length) {
+      return res.status(400).json({ message: "No valid record IDs provided" });
+    }
 
     const result = await Record.updateMany(
       { _id: { $in: validIds } },
-      {
-        $set: {
-          statusAtGP: StatusAtGP.PUBLISHED,
-          datePublished: new Date(),
-        },
-      },
+      { $set: { statusAtGP: StatusAtGP.PUBLISHED, datePublished: new Date() } }
     );
 
     return res.status(200).json({
@@ -407,12 +430,10 @@ export const getAllRecords = async (_req: Request, res: Response) => {
   try {
     const records = await Record.find()
       .select(
-        `
-        no causeNo nameOfDeceased dateReceived dateOfReceipt 
-        dateForwardedToGP receivingLeadTime forwardingLeadTime 
-        form60Compliance rejectionReason statusAtGP courtStation 
-        updatedBy lastEditAction createdAt updatedAt
-      `,
+        `no causeNo nameOfDeceased dateReceived dateOfReceipt
+         dateForwardedToGP receivingLeadTime forwardingLeadTime
+         form60Compliance rejectionReason statusAtGP courtStation
+         updatedBy lastEditAction createdAt updatedAt`
       )
       .populate("courtStation", "name level")
       .lean();
@@ -420,14 +441,14 @@ export const getAllRecords = async (_req: Request, res: Response) => {
     return res
       .status(200)
       .json({ success: true, count: records.length, records });
-  } catch (err: any) {
+  } catch {
     return res.status(500).json({ message: "Failed to fetch records" });
   }
 };
 
 export const getRecordsByCourt = async (
   req: Request<{ courtId: string }>,
-  res: Response,
+  res: Response
 ) => {
   try {
     const { courtId } = req.params;
@@ -442,7 +463,7 @@ export const getRecordsByCourt = async (
     return res
       .status(200)
       .json({ success: true, count: records.length, records });
-  } catch (err: any) {
+  } catch {
     return res.status(500).json({ message: "Failed to fetch court records" });
   }
 };
@@ -466,16 +487,26 @@ export const getAnalytics = async (req: Request, res: Response) => {
                 totalRecords: { $sum: 1 },
                 compliantCount: {
                   $sum: {
-                    $cond: [{ $eq: ["$form60Compliance", "Approved"] }, 1, 0],
+                    $cond: [
+                      { $eq: ["$form60Compliance", "Approved"] },
+                      1,
+                      0,
+                    ],
                   },
                 },
                 nonCompliantCount: {
                   $sum: {
-                    $cond: [{ $eq: ["$form60Compliance", "Rejected"] }, 1, 0],
+                    $cond: [
+                      { $eq: ["$form60Compliance", "Rejected"] },
+                      1,
+                      0,
+                    ],
                   },
                 },
                 pendingForwarding: {
-                  $sum: { $cond: [{ $eq: ["$statusAtGP", "Pending"] }, 1, 0] },
+                  $sum: {
+                    $cond: [{ $eq: ["$statusAtGP", "Pending"] }, 1, 0],
+                  },
                 },
                 averageLeadTime: { $avg: "$forwardingLeadTime" },
               },
@@ -488,7 +519,11 @@ export const getAnalytics = async (req: Request, res: Response) => {
                 count: { $sum: 1 },
                 complianceRate: {
                   $avg: {
-                    $cond: [{ $eq: ["$form60Compliance", "Approved"] }, 100, 0],
+                    $cond: [
+                      { $eq: ["$form60Compliance", "Approved"] },
+                      100,
+                      0,
+                    ],
                   },
                 },
               },

@@ -27,11 +27,8 @@ export interface IRecord extends Document {
   volumeNo?: string;
   datePublished?: Date | null;
   kpiAlertSent: boolean;
-
-  // AUDIT
   updatedBy?: Types.ObjectId;
   lastEditAction?: string;
-
   createdAt: Date;
   updatedAt: Date;
 }
@@ -42,16 +39,14 @@ export interface IRecord extends Document {
 
 export const calculateLeadTime = (
   start?: Date | string | null,
-  end?: Date | string | null,
+  end?: Date | string | null
 ): number | null => {
   if (!start || !end) return null;
-
   const a = new Date(start);
   const b = new Date(end);
-
   if (isNaN(a.getTime()) || isNaN(b.getTime())) return null;
-
-  return Math.ceil(Math.abs(b.getTime() - a.getTime()) / 86400000);
+  // Preserves sign — negative means end is before start (data anomaly)
+  return Math.ceil((b.getTime() - a.getTime()) / 86400000);
 };
 
 /* ======================================================
@@ -102,7 +97,6 @@ const recordSchema = new Schema<IRecord>(
 
     kpiAlertSent: { type: Boolean, default: false },
 
-    // AUDIT
     updatedBy: { type: Schema.Types.ObjectId, ref: "User" },
 
     lastEditAction: String,
@@ -111,66 +105,79 @@ const recordSchema = new Schema<IRecord>(
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
-  },
+  }
 );
+
+/* ======================================================
+   VIRTUALS
+====================================================== */
+
+// Convenience flag — avoids recomputing the threshold everywhere in the UI
+recordSchema.virtual("isKpiBreached").get(function () {
+  return (this.forwardingLeadTime ?? 0) > 30;
+});
 
 /* ======================================================
    INDEXES
 ====================================================== */
 
+// Unique per court — same causeNo can exist across different courts
 recordSchema.index({ courtStation: 1, causeNo: 1 }, { unique: true });
 
 /* ======================================================
    HOOKS
+   NOTE: pre("save") and pre("findOneAndUpdate") run for
+   single-document operations only. bulkWrite and updateMany
+   bypass these hooks — callers must compute lead times manually.
 ====================================================== */
 
-// On create / save
 recordSchema.pre("save", function () {
   this.receivingLeadTime = calculateLeadTime(
     this.dateOfReceipt,
-    this.dateReceived,
+    this.dateReceived
   );
-
   this.forwardingLeadTime = calculateLeadTime(
     this.dateReceived,
-    this.dateForwardedToGP,
+    this.dateForwardedToGP
   );
 });
 
-// On findOneAndUpdate (safe mutation)
-recordSchema.pre("findOneAndUpdate", async function () {
-  const update: any = this.getUpdate();
-  if (!update) return;
+// Covers both findOneAndUpdate and updateOne
+for (const hook of ["findOneAndUpdate", "updateOne"] as const) {
+  recordSchema.pre(hook, async function () {
+    const update: any = this.getUpdate();
+    if (!update) return;
 
-  const $set = update.$set || {};
+    const $set = update.$set || {};
 
-  const current = await this.model
-    .findOne(this.getQuery())
-    .select("dateReceived dateOfReceipt dateForwardedToGP")
-    .lean();
+    const current = await this.model
+      .findOne(this.getQuery())
+      .select("dateReceived dateOfReceipt dateForwardedToGP")
+      .lean();
 
-  if (!current) return;
+    if (!current) return;
 
-  const recStart = $set.dateOfReceipt ?? current.dateOfReceipt;
-  const recEnd = $set.dateReceived ?? current.dateReceived;
+    const recStart = $set.dateOfReceipt ?? current.dateOfReceipt;
+    const recEnd = $set.dateReceived ?? current.dateReceived;
+    if (recStart && recEnd) {
+      $set.receivingLeadTime = calculateLeadTime(recStart, recEnd);
+    }
 
-  if (recStart && recEnd) {
-    $set.receivingLeadTime = calculateLeadTime(recStart, recEnd);
-  }
+    const fwdStart = $set.dateReceived ?? current.dateReceived;
+    const fwdEnd = $set.dateForwardedToGP ?? current.dateForwardedToGP;
+    if (fwdStart && fwdEnd) {
+      $set.forwardingLeadTime = calculateLeadTime(fwdStart, fwdEnd);
+    }
 
-  const fwdStart = $set.dateReceived ?? current.dateReceived;
-  const fwdEnd = $set.dateForwardedToGP ?? current.dateForwardedToGP;
-
-  if (fwdStart && fwdEnd) {
-    $set.forwardingLeadTime = calculateLeadTime(fwdStart, fwdEnd);
-  }
-
-  update.$set = $set;
-});
+    update.$set = $set;
+  });
+}
 
 /* ======================================================
    EXPORT
 ====================================================== */
 
-const Record = mongoose.models.Record || mongoose.model<IRecord>("Record", recordSchema);
-export default Record;;
+const Record =
+  mongoose.models.Record || mongoose.model<IRecord>("Record", recordSchema);
+
+export default Record;
