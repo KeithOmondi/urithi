@@ -1,17 +1,10 @@
-import { UserRole } from "../models/user.model";
+// types/express/index.d.ts
+import { IUser } from "../../models/User";
 
 declare global {
   namespace Express {
-    interface UserPayload {
-      id: string;
-      role: UserRole;
-    }
-
     interface Request {
-      user?: UserPayload;
-      file?: Express.Multer.File;
+      user?: IUser;
     }
   }
 }
-
-export {};

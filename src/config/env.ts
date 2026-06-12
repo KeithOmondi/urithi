@@ -23,8 +23,8 @@ const required = [
   "BREVO_API_KEY",
 
   // ✅ EMAIL SENDER
-  "MAIL_FROM_NAME",
-  "MAIL_FROM_EMAIL",
+  "SENDER_NAME",
+  "SENDER_EMAIL",
 
   // ✅ APP METADATA
   "APP_VERSION",
@@ -59,11 +59,11 @@ export const env = {
   BREVO_API_KEY: process.env.BREVO_API_KEY as string,
 
   // ✅ EMAIL
-  MAIL_FROM_NAME: process.env.MAIL_FROM_NAME as string,
-  MAIL_FROM_EMAIL: process.env.MAIL_FROM_EMAIL as string,
+  SENDER_NAME: process.env.SENDER_NAME as string,
+  SENDER_EMAIL: process.env.SENDER_EMAIL as string,
   DEFAULT_CC_EMAIL: process.env.DEFAULT_CC_EMAIL as string,
 
-  //CLOUDINARY
+  // CLOUDINARY
   CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME as string,
   CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY as string,
   CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET as string,

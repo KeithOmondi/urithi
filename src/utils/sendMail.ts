@@ -1,25 +1,21 @@
-import * as SibApiV3Sdk from "sib-api-v3-sdk";
+// src/utils/email.ts
+import { BrevoClient } from "@getbrevo/brevo";
 import { env } from "../config/env";
 import Court, { ICourt } from "../models/court.model";
 
 /* =========================================================
-   INIT BREVO TRANSACTIONAL API
+   INIT
 ========================================================= */
 
-if (!env.BREVO_API_KEY) {
-  throw new Error("❌ BREVO_API_KEY is missing in your .env file");
-}
-
-const apiClient = SibApiV3Sdk.ApiClient.instance;
-apiClient.authentications["api-key"].apiKey = env.BREVO_API_KEY;
-
-const transactionalApi = new SibApiV3Sdk.TransactionalEmailsApi(apiClient);
+const brevo = new BrevoClient({
+  apiKey: env.BREVO_API_KEY,
+});
 
 /* =========================================================
    TYPES
 ========================================================= */
 
-export interface SendMailOptions {
+interface SendMailOptions {
   to: string | string[];
   subject: string;
   html: string;
@@ -30,8 +26,6 @@ export interface SendMailOptions {
 
 /* =========================================================
    CORE SEND FUNCTION
-   - Sends exactly to what is passed
-   - No hidden default CCs
 ========================================================= */
 
 export const sendMail = async ({
@@ -46,33 +40,31 @@ export const sendMail = async ({
     const toList = Array.isArray(to)
       ? to.map((email) => ({ email }))
       : [{ email: to }];
+
     const ccList = cc
       ? Array.isArray(cc)
         ? cc.map((email) => ({ email }))
         : [{ email: cc }]
       : undefined;
 
-    return await transactionalApi.sendTransacEmail({
-      sender: { name: env.MAIL_FROM_NAME, email: env.MAIL_FROM_EMAIL },
+    return await brevo.transactionalEmails.sendTransacEmail({
+      sender: { name: env.SENDER_NAME, email: env.SENDER_EMAIL },
       to: toList,
-      cc: ccList, // only CC explicitly passed emails
+      cc: ccList,
       subject,
       htmlContent: html,
-      textContent: text,
+      textContent: text ?? "Please enable HTML to view this message.",
       replyTo: replyTo ? { email: replyTo } : undefined,
     });
   } catch (err: any) {
-    console.error("❌ Email failed:", err?.response?.body || err);
-    throw new Error(
-      "Email failed: " + (err?.response?.body?.message || err.message),
-    );
+    const errorMsg = err?.response?.body?.message || err.message;
+    console.error(`[EMAIL ERROR] to ${to}:`, errorMsg);
+    throw new Error(`Email sending failed: ${errorMsg}`);
   }
 };
 
 /* =========================================================
    USER EMAIL HELPER
-   - For sending to a single user
-   - No CC, no default addresses
 ========================================================= */
 
 export const sendEmailToUser = async (
@@ -81,18 +73,11 @@ export const sendEmailToUser = async (
   html: string,
   text?: string,
 ) => {
-  return sendMail({
-    to: email,
-    subject,
-    html,
-    text,
-  });
+  return sendMail({ to: email, subject, html, text });
 };
 
 /* =========================================================
    COURT EMAIL HELPER
-   - Sends to primary email
-   - CCs secondary emails only
 ========================================================= */
 
 export const sendEmailToCourt = async (
@@ -110,6 +95,34 @@ export const sendEmailToCourt = async (
     subject,
     html,
     text,
+  });
+};
+
+/* =========================================================
+   OTP EMAIL
+========================================================= */
+
+export const sendOtpMail = async (
+  email: string,
+  pjNumber: string,
+  otp: string,
+) => {
+  return sendMail({
+    to: email,
+    subject: "Your Secure Portal Login Code",
+    html: `
+      <div style="font-family: sans-serif; padding: 20px; border: 1px solid #eee; border-radius: 8px; max-width: 500px; margin: 0 auto;">
+        <h2 style="color: #333; text-align: center;">Secure Portal Access</h2>
+        <p>A login request was initiated for PJ Number: <strong>${pjNumber}</strong>.</p>
+        <p>Use the verification code below to complete your authentication. This code expires in 10 minutes:</p>
+        <div style="background: #f4f6f9; padding: 15px; font-size: 28px; font-weight: bold; text-align: center; letter-spacing: 6px; color: #1a73e8; border-radius: 4px; margin: 25px 0;">
+          ${otp}
+        </div>
+        <p style="color: #666; font-size: 12px; text-align: center;">
+          If you did not make this request, you can safely ignore this email.
+        </p>
+      </div>
+    `,
   });
 };
 

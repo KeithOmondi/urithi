@@ -21,6 +21,7 @@ const UPDATABLE_FIELDS = [
   "form60Compliance",
   "rejectionReason",
   "statusAtGP",
+  "courtStation",
 ] as const;
 type UpdatableField = (typeof UPDATABLE_FIELDS)[number];
 
@@ -169,6 +170,14 @@ export const updateRecord = async (
     const updatedDoc = await Record.findById(record._id)
       .populate("courtStation", "name level")
       .lean();
+
+    console.log("[updateRecord]", {
+      recordId: record._id,
+      updatedBy: req.user?.id,
+      updatedFields: updates,
+      safeBody,
+      updatedDoc,
+    });
 
     notifyStakeholders(updatedDoc, {
       isForwarding: "dateForwardedToGP" in req.body,

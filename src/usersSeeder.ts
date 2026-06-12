@@ -3,6 +3,9 @@ import mongoose from "mongoose";
 import { env } from "./config/env";
 import { User, UserRole } from "./models/User";
 
+// Default password for seeded users
+const DEFAULT_PASSWORD = "Password123!";
+
 // Seed data
 const users = [
   {
@@ -12,11 +15,12 @@ const users = [
     pjNumber: "43244",
     role: UserRole.ADMIN,
   },
+  
   {
-    firstName: "Hon. Edith",
-    lastName: "Malizu",
-    email: "edithmalizu@gmail.com",
-    pjNumber: "46446",
+    firstName: "Dennis",
+    lastName: "Keith",
+    email: "denniskeith62@gmail.com",
+    pjNumber: "00045",
     role: UserRole.USER,
   },
   {
@@ -61,7 +65,7 @@ const users = [
     pjNumber: "00045",
     role: UserRole.USER,
   },
-{
+  {
     firstName: "Eva",
     lastName: "Kimeiywo",
     email: "evakimeiywo@gmail.com",
@@ -82,7 +86,6 @@ const users = [
     pjNumber: "12345",
     role: UserRole.GP,
   },
-  
 ];
 
 async function seedUsers() {
@@ -90,25 +93,38 @@ async function seedUsers() {
     await mongoose.connect(env.MONGO_URI, { dbName: env.DB_NAME });
     console.log(`✅ Connected to MongoDB: ${mongoose.connection.name}`);
 
-    // 1. REMOVED: await User.deleteMany({}); 
-    // This ensures existing users stay in the database.
-
     for (const userData of users) {
-      // 2. USE upsert logic to prevent duplicate errors 
-      // This checks if a user with that email or pjNumber already exists
+      // Check if user already exists by email or pjNumber
       const existingUser = await User.findOne({ 
         $or: [{ email: userData.email }, { pjNumber: userData.pjNumber }] 
       });
 
       if (!existingUser) {
-        await User.create(userData);
-        console.log(`👤 Seeded New: ${userData.firstName} ${userData.lastName}`);
+        // Let the model's pre-save hook hash the password
+        await User.create({
+          ...userData,
+          password: DEFAULT_PASSWORD, // Raw password - model will hash
+          isActive: true,
+        });
+        console.log(`✅ Seeded: ${userData.firstName} ${userData.lastName} (${userData.role})`);
       } else {
-        console.log(`⏩ Skipped (Already Exists): ${userData.firstName} ${userData.lastName}`);
+        // Update existing user's password if missing or incorrect
+        if (!existingUser.password) {
+          existingUser.password = DEFAULT_PASSWORD; // Let model hash it
+          await existingUser.save();
+          console.log(`🔄 Updated password for: ${userData.firstName} ${userData.lastName}`);
+        } else {
+          console.log(`⏩ Skipped: ${userData.firstName} ${userData.lastName} (already exists)`);
+        }
       }
     }
 
-    console.log("🎉 Script execution finished");
+    console.log("\n📋 Seed Summary:");
+    console.log(`✅ Processed ${users.length} user(s)`);
+    console.log(`🔑 Password for all users: ${DEFAULT_PASSWORD}`);
+    console.log("\n⚠️  IMPORTANT: Change passwords on first login!");
+    console.log("\n🎉 Script execution finished");
+    
     await mongoose.disconnect();
     process.exit(0);
   } catch (err) {
