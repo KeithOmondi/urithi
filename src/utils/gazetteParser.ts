@@ -2,9 +2,26 @@
 const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
 pdfjsLib.GlobalWorkerOptions.workerSrc = "";
 
-// Case-insensitive — gazette uses small caps: "Cause No." not "CAUSE NO."
-// Handles: "Cause No. E497 of 2024", "CAUSE NO. E497 OF 2024", "Cause No. 674 of 2025"
-const CAUSE_NO_REGEX = /Cause\s+No\.?\s*(E?\d+)\s+of\s+(\d{4})/gi;
+// More flexible patterns - now case-insensitive and handles multiple formats
+const CAUSE_NO_PATTERNS = [
+  // Format: "Cause No. E497 of 2024" or "CAUSE NO. E497 OF 2024"
+  /Cause\s+No\.?\s*(E?\d+)\s+of\s+(\d{4})/gi,
+  
+  // Format: "Cause No. E497/2024"
+  /Cause\s+No\.?\s*(E?\d+)\s*\/\s*(\d{4})/gi,
+  
+  // Format: "E497/2024" (without "Cause No.")
+  /(E?\d+)\s*\/\s*(\d{4})/gi,
+  
+  // Format: "E497 OF 2024" (without "Cause No.")
+  /(E?\d+)\s+OF\s+(\d{4})/gi,
+  
+  // Format: "E497-2024"
+  /(E?\d+)\s*-\s*(\d{4})/gi,
+  
+  // Format: "Cause No: E497 of 2024"
+  /Cause\s+No[.:]\s*(E?\d+)\s+of\s+(\d{4})/gi,
+];
 
 export interface ParsedCauseNo {
   raw: string;
@@ -45,25 +62,36 @@ export async function extractCauseNosFromPdf(
   fileBuffer: Buffer
 ): Promise<ParsedCauseNo[]> {
   const text = await extractTextFromPdf(fileBuffer);
+  
+  // Log for debugging
+  console.log('Extracted text length:', text.length);
+  console.log('First 500 chars:', text.substring(0, 500));
 
   const found: ParsedCauseNo[] = [];
   const seen = new Set<string>();
 
-  CAUSE_NO_REGEX.lastIndex = 0;
+  // Try each pattern
+  for (const pattern of CAUSE_NO_PATTERNS) {
+    pattern.lastIndex = 0;
+    let match: RegExpExecArray | null;
 
-  let match: RegExpExecArray | null;
+    while ((match = pattern.exec(text)) !== null) {
+      const number = match[1].trim().toUpperCase();
+      const year = match[2].trim();
+      
+      // Format as "E497/2024" for consistency
+      const normalized = `${number}/${year}`;
+      const raw = `${number} OF ${year}`;
 
-  while ((match = CAUSE_NO_REGEX.exec(text)) !== null) {
-    const number = match[1].trim().toUpperCase(); // E497
-    const year = match[2].trim();                 // 2024
-    const raw = `${number} OF ${year}`;           // E497 OF 2024
-    const normalized = `CAUSE NO. ${raw}`;        // CAUSE NO. E497 OF 2024
-
-    if (!seen.has(normalized)) {
-      seen.add(normalized);
-      found.push({ raw, normalized });
+      if (!seen.has(normalized)) {
+        seen.add(normalized);
+        found.push({ raw, normalized });
+      }
     }
   }
+
+  console.log('Found cause numbers:', found.length);
+  console.log('Sample:', found.slice(0, 3));
 
   return found;
 }

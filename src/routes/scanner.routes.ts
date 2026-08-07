@@ -12,7 +12,7 @@ import { upload } from "../config/cloudinary";
 
 const router = Router();
 
-router.use(protect, restrictTo("admin"));
+router.use(protect, restrictTo("admin", "user"));
 
 router.post("/scan/preview", upload.single("gazette"), previewScan);
 router.post("/scan/confirm", confirmScan);
